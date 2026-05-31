@@ -1,0 +1,224 @@
+package com.example.minecraft.data
+
+import android.content.Context
+import android.util.Log
+import com.example.minecraft.model.ModDefinition
+import com.example.minecraft.model.WorldSave
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import java.io.File
+
+object WorldSaver {
+    private const val TAG = "WorldSaver"
+    private const val WORLDS_DIR = "minecraft_worlds"
+    private const val MODS_DIR = "minecraft_mods"
+
+    private val moshi: Moshi = Moshi.Builder()
+        .addLast(KotlinJsonAdapterFactory())
+        .build()
+
+    private val worldAdapter = moshi.adapter(WorldSave::class.java)
+    private val modAdapter = moshi.adapter(ModDefinition::class.java)
+    private val modListAdapter = moshi.adapter<List<ModDefinition>>(
+        Types.newParameterizedType(List::class.java, ModDefinition::class.java)
+    )
+
+    /**
+     * Get list of all saved world names/files.
+     */
+    fun listWorlds(context: Context): List<WorldSave> {
+        val dir = File(context.filesDir, WORLDS_DIR)
+        if (!dir.exists()) {
+            dir.mkdirs()
+            return emptyList()
+        }
+
+        val files = dir.listFiles { _, name -> name.endsWith(".json") } ?: return emptyList()
+        val worlds = mutableListOf<WorldSave>()
+        
+        for (f in files) {
+            try {
+                val json = f.readText()
+                val world = worldAdapter.fromJson(json)
+                if (world != null) {
+                    worlds.add(world)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing world file ${f.name}", e)
+            }
+        }
+        
+        return worlds.sortedByDescending { it.creationTime }
+    }
+
+    /**
+     * Serializes and writes a world state to local files.
+     */
+    fun saveWorld(context: Context, world: WorldSave) {
+        try {
+            val dir = File(context.filesDir, WORLDS_DIR)
+            if (!dir.exists()) dir.mkdirs()
+
+            // Safe alphanumeric name for file
+            val safeName = world.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            val file = File(dir, "$safeName.json")
+            
+            val json = worldAdapter.toJson(world)
+            file.writeText(json)
+            Log.d(TAG, "Successfully saved world ${world.name} to ${file.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving world ${world.name}", e)
+        }
+    }
+
+    /**
+     * Deletes a world save file.
+     */
+    fun deleteWorld(context: Context, worldName: String) {
+        try {
+            val dir = File(context.filesDir, WORLDS_DIR)
+            val safeName = worldName.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            val file = File(dir, "$safeName.json")
+            if (file.exists()) {
+                file.delete()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting world $worldName", e)
+        }
+    }
+
+    /**
+     * List all custom mods created by the user.
+     */
+    fun listMods(context: Context): List<ModDefinition> {
+        val dir = File(context.filesDir, MODS_DIR)
+        if (!dir.exists()) {
+            dir.mkdirs()
+            // Create a default example Mod so they start with a beautiful template!
+            val example = createExampleMod()
+            saveMod(context, example)
+            return listOf(example)
+        }
+
+        val files = dir.listFiles { _, name -> name.endsWith(".json") || name.endsWith(".mjm") } ?: return emptyList()
+        val mods = mutableListOf<ModDefinition>()
+
+        for (f in files) {
+            try {
+                if (f.name.endsWith(".mjm")) {
+                    val script = f.readText()
+                    val mod = ModDefinition.parseMjmScript(script)
+                    mods.add(mod)
+                } else {
+                    val json = f.readText()
+                    val mod = modAdapter.fromJson(json)
+                    if (mod != null) {
+                        mods.add(mod)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing mod file ${f.name}", e)
+            }
+        }
+
+        if (mods.isEmpty()) {
+            val example = createExampleMod()
+            saveMod(context, example)
+            return listOf(example)
+        }
+
+        return mods
+    }
+
+    /**
+     * Saves a mod definition.
+     */
+    fun saveMod(context: Context, mod: ModDefinition) {
+        try {
+            val dir = File(context.filesDir, MODS_DIR)
+            if (!dir.exists()) dir.mkdirs()
+
+            val safeName = mod.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            val file = File(dir, "$safeName.json")
+
+            val json = modAdapter.toJson(mod)
+            file.writeText(json)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving mod ${mod.name}", e)
+        }
+    }
+
+    fun saveMjmScript(context: Context, modId: String, scriptText: String) {
+        try {
+            val dir = File(context.filesDir, MODS_DIR)
+            if (!dir.exists()) dir.mkdirs()
+
+            val safeName = modId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            val file = File(dir, "$safeName.mjm")
+            file.writeText(scriptText)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving MJM script mod $modId", e)
+        }
+    }
+
+    /**
+     * Deletes a mod.
+     */
+    fun deleteMod(context: Context, modId: String) {
+        try {
+            val dir = File(context.filesDir, MODS_DIR)
+            val safeName = modId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            val fileJson = File(dir, "$safeName.json")
+            if (fileJson.exists()) fileJson.delete()
+            val fileMjm = File(dir, "$safeName.mjm")
+            if (fileMjm.exists()) fileMjm.delete()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting mod $modId", e)
+        }
+    }
+
+    private fun createExampleMod(): ModDefinition {
+        return ModDefinition(
+            id = "mod_emerald_plus",
+            name = "Emerald Plus Mod",
+            description = "Brings raw Emerald ores to life, introducing Emerald tools and crafting recipes!",
+            blocks = listOf(
+                com.example.minecraft.model.CustomBlockDef(
+                    id = "mod_emerald_ore",
+                    name = "Emerald Ore",
+                    colorHex = "#2C2C2C",
+                    accentColorHex = "#2EBF6A", // Radiant green accent
+                    hardness = 2.4f,
+                    spawnFrequency = "Medium",
+                    spawnDepthMin = 4,
+                    spawnDepthMax = 20,
+                    dropItemId = "mod_emerald_gem",
+                    smeltingResultItemId = "mod_emerald_ingot",
+                    craftingIngredients = mapOf("cobblestone" to 8, "coal" to 1) // Also craftable with cobblestone surrounding coal!
+                )
+            ),
+            tools = listOf(
+                com.example.minecraft.model.CustomToolDef(
+                    id = "mod_emerald_sword",
+                    name = "Emerald Broadsword",
+                    type = "Sword",
+                    tier = "Diamond",
+                    colorHex = "#2EBF6A",
+                    efficiency = 12.0f,
+                    craftingIngredients = mapOf("mod_emerald_gem" to 2, "stick" to 1)
+                ),
+                com.example.minecraft.model.CustomToolDef(
+                    id = "mod_emerald_pickaxe",
+                    name = "Emerald Pickaxe",
+                    type = "Pickaxe",
+                    tier = "Diamond",
+                    colorHex = "#2EBF6A",
+                    efficiency = 15.0f, // extremely fast!
+                    craftingIngredients = mapOf("mod_emerald_gem" to 3, "stick" to 2)
+                )
+            ),
+            isEnabled = true
+        )
+    }
+}

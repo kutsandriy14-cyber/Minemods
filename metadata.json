@@ -1,0 +1,6 @@
+{
+  "name": "MineMods",
+  "description": "MineMods (Mods Mobile Java) featuring 1st-person immersive 3D, support for high fidelity custom-scripted .mjm mods, auto-crafters, copper variants, trial chambers, and limitless sandbox creativity!",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
