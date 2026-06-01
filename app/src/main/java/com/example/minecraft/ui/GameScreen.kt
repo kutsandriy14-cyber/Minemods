@@ -97,18 +97,19 @@ fun GameScreen(
         while (true) {
             delay(16) // ~60fps ticks
             if (!isPaused && particles.isNotEmpty()) {
-                val listSnapshot = particles.toList()
-                particles.clear()
-                listSnapshot.forEach { p ->
+                val nextParticles = ArrayList<BlockParticle>(particles.size)
+                particles.forEach { p ->
                     p.x += p.vx
                     p.y += p.vy
                     p.vy += 0.4f // Gravitational constant
                     p.age++
                     p.alpha = (1.0f - p.age.toFloat() / p.maxAge).coerceIn(0f, 1f)
                     if (p.age < p.maxAge) {
-                        particles.add(p)
+                        nextParticles.add(p)
                     }
                 }
+                particles.clear()
+                particles.addAll(nextParticles)
             }
         }
     }
@@ -117,7 +118,7 @@ fun GameScreen(
     val activeHotItem = player.inventory[player.activeHotbarIndex]
 
     // 3D Engine Variables
-    var is3DMode by remember { mutableStateOf(true) } // State-of-the-art 3D OpenGL enabled by default!
+    val is3DMode = true
     var pitchAngle by remember { mutableStateOf(-12f) }
     var yawAngle by remember { mutableStateOf(14f) }
     val currentYaw by androidx.compose.runtime.rememberUpdatedState(yawAngle)
@@ -153,205 +154,16 @@ fun GameScreen(
             val camOffsetX = player.x * tileSizePx - (viewWidthPx / 2f)
             val camOffsetY = (world.height - player.y) * tileSizePx - (viewHeightPx / 2f)
 
-            // Dynamic background interpolation based on world.currentSkyTime (0 to 24000)
-            val skyColor = remember(world.currentSkyTime) {
-                val tick = world.currentSkyTime
-                when {
-                    tick < 10000 -> SkyDay
-                    tick < 12000 -> {
-                        // Blend Day to Dusk
-                        val ratio = (tick - 10000) / 2000f
-                        lerpColor(SkyDay, SkyDusk, ratio)
-                    }
-                    tick < 13000 -> {
-                        // Blend Dusk to Night
-                        val ratio = (tick - 12000) / 1000f
-                        lerpColor(SkyDusk, SkyNight, ratio)
-                    }
-                    tick < 21000 -> SkyNight
-                    tick < 22000 -> {
-                        // Blend Night to Dawn
-                        val ratio = (tick - 21000) / 1000f
-                        lerpColor(SkyNight, SkyDawn, ratio)
-                    }
-                    else -> {
-                        // Blend Dawn to Day
-                        val ratio = (tick - 22000) / 2000f
-                        lerpColor(SkyDawn, SkyDay, ratio)
-                    }
-                }
-            }
-
-            if (is3DMode) {
-                // RENDER GORGEOUS HARDWARE-ACCELERATED 3D OPENGL VOXEL SANDBOX!
-                Minecraft3DView(
-                    modifier = Modifier.fillMaxSize(),
-                    world = world,
-                    viewModel = viewModel,
-                    pitchAngle = pitchAngle,
-                    yawAngle = yawAngle,
-                    zoomVal = zoomVal,
-                    onBlockTap = { vx, vy -> }
-                )
-            } else {
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(skyColor)
-                ) {
-                    // Background star overlays during night!
-                    if (world.currentSkyTime in 12500f..21500f) {
-                        val rand = java.util.Random(42) // Stable stars
-                        for (i in 0..60) {
-                            val sx = rand.nextFloat() * size.width
-                            val sy = rand.nextFloat() * size.height
-                            val brightness = rand.nextFloat()
-                            drawCircle(
-                                color = Color.White.copy(alpha = brightness),
-                                radius = 2f,
-                                center = Offset(sx, sy)
-                            )
-                        }
-                    }
-
-                    // Calculate visible world column boundaries
-                    val startCol = (camOffsetX / tileSizePx).toInt().coerceIn(0, world.width - 1)
-                    val endCol = ((camOffsetX + viewWidthPx) / tileSizePx).toInt().coerceIn(0, world.width - 1)
-                    val startRow = (camOffsetY / tileSizePx).toInt().coerceIn(0, world.height - 1)
-                    val endRow = ((camOffsetY + viewHeightPx) / tileSizePx).toInt().coerceIn(0, world.height - 1)
-
-                    // RENDER BLOCKS GRID
-                    for (cx in startCol..endCol) {
-                        for (cyRow in startRow..endRow) {
-                            val cy = world.height - 1 - cyRow
-                            val bId = world.worldBlocks["$cx,$cy"] ?: "air"
-                            if (bId == "air") continue
-
-                            val bType = GameRegistry.blocks[bId] ?: continue
-                            val vx = cx * tileSizePx - camOffsetX
-                            val vy = cyRow * tileSizePx - camOffsetY
-
-                            // Solid block filled drawing
-                            drawRect(
-                                color = bType.getColor(),
-                                topLeft = Offset(vx, vy),
-                                size = Size(tileSizePx, tileSizePx)
-                            )
-
-                            // 3D Highlight top edge / shadows patterns
-                            bType.getTopColor()?.let { topCol ->
-                                drawRect(
-                                    color = topCol,
-                                    topLeft = Offset(vx, vy),
-                                    size = Size(tileSizePx, tileSizePx * 0.18f)
-                                )
-                            }
-
-                            // Crack accent/border sketches inside pixels
-                            bType.getAccentColor()?.let { accCol ->
-                                // Left outline highlight
-                                drawRect(
-                                    color = accCol,
-                                    topLeft = Offset(vx, vy),
-                                    size = Size(tileSizePx * 0.08f, tileSizePx)
-                                )
-                                // Right bottom frame shadow
-                                drawRect(
-                                    color = accCol,
-                                    topLeft = Offset(vx, vy + tileSizePx - (tileSizePx * 0.08f)),
-                                    size = Size(tileSizePx, tileSizePx * 0.08f)
-                                )
-                            }
-
-                            // Decorate distinct blocks visually (crosses, boxes, rings)
-                            when (bId) {
-                                "oak_log" -> {
-                                    drawRect(color = Color(0xFF4A321A), topLeft = Offset(vx + tileSizePx*0.25f, vy), size = Size(tileSizePx*0.5f, tileSizePx))
-                                }
-                                "oak_leaves" -> {
-                                    drawCircle(color = Color(0xFF1D4713), radius = tileSizePx*0.3f, center = Offset(vx + tileSizePx/2f, vy + tileSizePx/2f))
-                                }
-                                "coal_ore" -> {
-                                    drawCircle(color = Color.Black, radius = tileSizePx*0.12f, center = Offset(vx + tileSizePx*0.3f, vy + tileSizePx*0.4f))
-                                    drawCircle(color = Color.Black, radius = tileSizePx*0.09f, center = Offset(vx + tileSizePx*0.7f, vy + tileSizePx*0.65f))
-                                }
-                                "iron_ore" -> {
-                                    drawCircle(color = Color(0xFFD09476), radius = tileSizePx*0.13f, center = Offset(vx + tileSizePx*0.4f, vy + tileSizePx*0.3f))
-                                    drawCircle(color = Color(0xFFD09476), radius = tileSizePx*0.1f, center = Offset(vx + tileSizePx*0.65f, vy + tileSizePx*0.65f))
-                                }
-                                "diamond_ore" -> {
-                                    drawCircle(color = Color(0xFF4DDEEC), radius = tileSizePx*0.11f, center = Offset(vx + tileSizePx*0.35f, vy + tileSizePx*0.6f))
-                                    drawCircle(color = Color(0xFF4DDEEC), radius = tileSizePx*0.14f, center = Offset(vx + tileSizePx*0.65f, vy + tileSizePx*0.35f))
-                                }
-                                "crafting_table" -> {
-                                    drawRect(color = Color(0xFF5A3E26), topLeft = Offset(vx + tileSizePx*0.2f, vy + tileSizePx*0.2f), size = Size(tileSizePx*0.6f, tileSizePx*0.6f))
-                                }
-                                "furnace" -> {
-                                    drawRect(color = Color.Black, topLeft = Offset(vx + tileSizePx*0.25f, vy + tileSizePx*0.4f), size = Size(tileSizePx*0.5f, tileSizePx*0.4f))
-                                }
-                                "chest" -> {
-                                    drawRect(color = Color(0xFFFFD700), topLeft = Offset(vx + tileSizePx*0.4f, vy + tileSizePx*0.4f), size = Size(tileSizePx*0.2f, tileSizePx*0.2f))
-                                }
-                            }
-
-                            // Draw Grid Border Wireframe
-                            drawRect(
-                                color = Color(0x22000000),
-                                topLeft = Offset(vx, vy),
-                                size = Size(tileSizePx, tileSizePx),
-                                style = Stroke(width = 1f)
-                            )
-                        }
-                    }
-
-                    // ==========================================
-                    // 2. RENDER STEVE PLAYER MODEL
-                    // ==========================================
-                    val steveWidth = 0.6f * tileSizePx
-                    val steveHeight = 1.8f * tileSizePx
-                    val sx = (player.x * tileSizePx) - camOffsetX
-                    val sy = ((world.height - player.y - 1.8f) * tileSizePx) - camOffsetY
-
-                    // Head (Peach skin color box)
-                    drawRect(
-                        color = Color(0xFFE8B68E),
-                        topLeft = Offset(sx + (steveWidth * 0.15f), sy),
-                        size = Size(steveWidth * 0.7f, steveHeight * 0.25f)
-                    )
-                    // Hair decoration (Dark brown cap)
-                    drawRect(
-                        color = Color(0xFF52331E),
-                        topLeft = Offset(sx + (steveWidth * 0.15f), sy),
-                        size = Size(steveWidth * 0.7f, steveHeight * 0.08f)
-                    )
-
-                    // Body torso (Steve Cyan clothes)
-                    drawRect(
-                        color = Color(0xFF00ADB5),
-                        topLeft = Offset(sx, sy + (steveHeight * 0.25f)),
-                        size = Size(steveWidth, steveHeight * 0.42f)
-                    )
-
-                    // Trousers/Legs (Purple)
-                    drawRect(
-                        color = Color(0xFF3F3B6C),
-                        topLeft = Offset(sx + (steveWidth * 0.08f), sy + (steveHeight * 0.67f)),
-                        size = Size(steveWidth * 0.84f, steveHeight * 0.33f)
-                    )
-
-                    // Left & Right Shoes (Grey outline top ground)
-                    drawRect(
-                        color = Color(0xFF222831),
-                        topLeft = Offset(sx + (steveWidth * 0.08f), sy + (steveHeight * 0.95f)),
-                        size = Size(steveWidth * 0.35f, steveHeight * 0.05f)
-                    )
-                    drawRect(
-                        color = Color(0xFF222831),
-                        topLeft = Offset(sx + (steveWidth * 0.57f), sy + (steveHeight * 0.95f)),
-                        size = Size(steveWidth * 0.35f, steveHeight * 0.05f)
-                    )
-                }
-            }
+            // RENDER GORGEOUS HARDWARE-ACCELERATED 3D OPENGL VOXEL SANDBOX!
+            Minecraft3DView(
+                modifier = Modifier.fillMaxSize(),
+                world = world,
+                viewModel = viewModel,
+                pitchAngle = pitchAngle,
+                yawAngle = yawAngle,
+                zoomVal = zoomVal,
+                onBlockTap = { vx, vy -> }
+            )
 
             // --- UNIFIED TOUCH GESTURE CONTROLLER (HOLD-TO-BREAK & TAP-TO-PLACE) ---
             var activeMiningX by remember { mutableStateOf(-1) }
@@ -681,12 +493,7 @@ fun GameScreen(
                     )
                 }
 
-                // 2D <-> 3D Mode Switcher
-                MinecraftButton(
-                    text = if (is3DMode) "Switch 2D" else "Switch 3D",
-                    onClick = { is3DMode = !is3DMode },
-                    modifier = Modifier.height(34.dp)
-                )
+
 
                 // Creative / Survival mode button toggle
                 MinecraftButton(
@@ -1018,7 +825,12 @@ fun GameScreen(
                     ) {
                         // Left Pane: Player Main Inventory slots (9 to 35) + Hotbar (0 to 8)
                         Column(modifier = Modifier.weight(1.3f)) {
-                            Text("STORAGE BLOCKBAG", color = Color.Gray, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                            Text(
+                                text = if (world.gameMode == "Creative") "STORAGE BLOCKBAG (TAP SLOT TO CLEAR)" else "STORAGE BLOCKBAG",
+                                color = Color.Gray,
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
                             Spacer(modifier = Modifier.height(4.dp))
                             
                             // Render 3x9 Inventory Grid
@@ -1042,6 +854,8 @@ fun GameScreen(
                                                     viewModel.moveFurnaceItem(context, "INPUT", index)
                                                 } else if (openChestCoord != null) {
                                                     viewModel.moveChestItem(context, 0, index, true) // quick load
+                                                } else if (world.gameMode == "Creative") {
+                                                    viewModel.clearInventorySlot(context, index)
                                                 }
                                             },
                                         contentAlignment = Alignment.Center

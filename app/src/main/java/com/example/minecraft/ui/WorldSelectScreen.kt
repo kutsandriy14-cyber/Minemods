@@ -113,7 +113,7 @@ fun WorldSelectScreen(
                         WorldCard(
                             save = save,
                             onPlay = { viewModel.playWorld(context, save) },
-                            onDelete = { viewModel.deleteWorld(context, save.name) }
+                            onDelete = { viewModel.deleteWorld(context, save) }
                         )
                     }
                 }

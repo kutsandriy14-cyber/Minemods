@@ -25,7 +25,8 @@ object PhysicsEngine {
         jumpPressed: Boolean,
         worldBlocks: Map<String, String>,
         worldWidth: Int,
-        worldHeight: Int
+        worldHeight: Int,
+        isCreative: Boolean = false
     ): Float {
         var damageTaken = 0f
 
@@ -34,7 +35,16 @@ object PhysicsEngine {
 
         // Apply Gravity
         if (!player.isGrounded) {
-            player.velocityY = (player.velocityY + GRAVITY).coerceAtLeast(MAX_FALL_SPEED)
+            if (isCreative) {
+                if (jumpPressed) {
+                    player.velocityY = JUMP_FORCE
+                } else {
+                    // Fall slower when in air to simulate flight/floating
+                    player.velocityY = (player.velocityY + GRAVITY * 0.35f).coerceAtLeast(MAX_FALL_SPEED * 0.3f)
+                }
+            } else {
+                player.velocityY = (player.velocityY + GRAVITY).coerceAtLeast(MAX_FALL_SPEED)
+            }
         } else {
             if (player.velocityY < 0) {
                 // Check fall speed for fall damage
@@ -58,10 +68,7 @@ object PhysicsEngine {
         // Try movement along X axis
         val originalX = player.x
         player.x += player.velocityX
-        // Clamp to world bounds
-        val maxX = worldWidth.toFloat() - PLAYER_WIDTH - 0.2f
-        if (player.x < 0.2f) player.x = 0.2f
-        if (player.x > maxX) player.x = maxX
+        // Infinite world: No horizontal boundaries or barriers!
 
         // Check if player intersects solid blocks along X
         if (checkCollision(player.x, player.y, worldBlocks)) {

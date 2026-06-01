@@ -2,6 +2,7 @@ package com.example
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -47,6 +48,14 @@ fun MainAppContent(viewModel: GameViewModel) {
     val mods by viewModel.mods.collectAsState()
     val activeWorld by viewModel.activeWorld.collectAsState()
     val editingMod by viewModel.editingMod.collectAsState()
+
+    // Intercept back button when not in the Launcher
+    BackHandler(enabled = currentScreen != Screen.Launcher) {
+        if (currentScreen == Screen.Game) {
+            viewModel.closeContainer(context)
+        }
+        viewModel.navigateTo(Screen.Launcher)
+    }
 
     // Load data from files at boot!
     LaunchedEffect(Unit) {

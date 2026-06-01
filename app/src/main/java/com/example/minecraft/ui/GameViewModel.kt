@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.minecraft.data.WorldSaver
+import com.example.minecraft.data.sanitize
 import com.example.minecraft.engine.PhysicsEngine
 import com.example.minecraft.engine.TerrainGenerator
 import com.example.minecraft.model.*
@@ -180,15 +181,17 @@ class GameViewModel : ViewModel() {
         val seed = Random.nextLong()
         val defaultInventory = MutableList<ItemStack?>(36) { null }
         
-        // Creative mode grants full vanilla blocks stack by default!
+        // Creative mode grants a hand-curated hotbar of essential tools and blocks, leaving the rest of the inventory empty for custom selections!
         if (mode == "Creative") {
-            var i = 0
-            GameRegistry.items.values.sortedBy { it.isBlock }.forEach { item ->
-                if (i < 36) {
-                    defaultInventory[i] = ItemStack(item.id, 64)
-                    i++
-                }
-            }
+            defaultInventory[0] = ItemStack("netherite_pickaxe", 1)
+            defaultInventory[1] = ItemStack("mace", 1)
+            defaultInventory[2] = ItemStack("grass", 64)
+            defaultInventory[3] = ItemStack("stone", 64)
+            defaultInventory[4] = ItemStack("oak_planks", 64)
+            defaultInventory[5] = ItemStack("oak_log", 64)
+            defaultInventory[6] = ItemStack("crafter", 64)
+            defaultInventory[7] = ItemStack("chest", 64)
+            defaultInventory[8] = ItemStack("wind_charge", 64)
         } else {
             // Survival grants some structural items
             defaultInventory[0] = ItemStack("wooden_pickaxe", 1)
@@ -238,21 +241,24 @@ class GameViewModel : ViewModel() {
     }
 
     fun playWorld(context: Context, save: WorldSave) {
+        val sanitizedSave = save.sanitize()
         // Reset registries first
         GameRegistry.resetToVanilla()
         
         // Load enabled mods
         _mods.value.forEach { mod ->
-            if (save.enabledModIds.contains(mod.id)) {
+            if (sanitizedSave.enabledModIds.contains(mod.id)) {
                 GameRegistry.registerMod(mod)
             }
         }
 
         // Auto-upgrade width to 100000 and adjust player position if it was 200
-        val upgradedSave = if (save.width < 1000) {
+        val upgradedSave = if (sanitizedSave.width < 1000) {
             val offset = 50000 - 50
             val upgradedBlocks = mutableMapOf<String, String>()
-            save.worldBlocks.forEach { (coord, blockId) ->
+            for (entry in sanitizedSave.worldBlocks.entries) {
+                val coord = entry.key
+                val blockId = entry.value
                 val parts = coord.split(",")
                 if (parts.size == 2) {
                     val originalX = parts[0].toIntOrNull() ?: 0
@@ -261,15 +267,15 @@ class GameViewModel : ViewModel() {
                     upgradedBlocks["$newX,$y"] = blockId
                 }
             }
-            save.copy(
+            sanitizedSave.copy(
                 width = 100000,
-                playerState = save.playerState.copy(
-                    x = save.playerState.x + offset
+                playerState = sanitizedSave.playerState.copy(
+                    x = sanitizedSave.playerState.x + offset
                 ),
                 worldBlocks = upgradedBlocks
             )
         } else {
-            save
+            sanitizedSave
         }
 
         _activeWorld.value = upgradedSave
@@ -285,8 +291,8 @@ class GameViewModel : ViewModel() {
         startGameLoop(context)
     }
 
-    fun deleteWorld(context: Context, name: String) {
-        WorldSaver.deleteWorld(context, name)
+    fun deleteWorld(context: Context, world: WorldSave) {
+        WorldSaver.deleteWorld(context, world)
         loadLauncherData(context)
     }
 
@@ -316,25 +322,26 @@ class GameViewModel : ViewModel() {
         val playerXInt = player.x.toInt()
         val checkRadius = 60
         var worldChanged = false
-        val mutableBlocks = world.worldBlocks.toMutableMap()
+        var mutableBlocks: MutableMap<String, String>? = null
         
         for (x in (playerXInt - checkRadius)..(playerXInt + checkRadius)) {
-            if (x in 2 until world.width - 2) {
-                val sentinelKey = "$x,0"
-                if (!mutableBlocks.containsKey(sentinelKey)) {
-                    val columnBlocks = TerrainGenerator.generateColumn(
-                        x = x,
-                        seed = world.seed,
-                        height = world.height,
-                        worldType = world.worldType,
-                        enabledModIds = world.enabledModIds
-                    )
-                    mutableBlocks.putAll(columnBlocks)
-                    worldChanged = true
+            val sentinelKey = "$x,0"
+            if (!world.worldBlocks.containsKey(sentinelKey)) {
+                if (mutableBlocks == null) {
+                    mutableBlocks = world.worldBlocks.toMutableMap()
                 }
+                val columnBlocks = TerrainGenerator.generateColumn(
+                    x = x,
+                    seed = world.seed,
+                    height = world.height,
+                    worldType = world.worldType,
+                    enabledModIds = world.enabledModIds
+                )
+                mutableBlocks.putAll(columnBlocks)
+                worldChanged = true
             }
         }
-        if (worldChanged) {
+        if (worldChanged && mutableBlocks != null) {
             world = world.copy(worldBlocks = mutableBlocks)
             _activeWorld.value = world
         }
@@ -346,7 +353,8 @@ class GameViewModel : ViewModel() {
             jumpPressed = isJumpingPressed,
             worldBlocks = world.worldBlocks,
             worldWidth = world.width,
-            worldHeight = world.height
+            worldHeight = world.height,
+            isCreative = (world.gameMode == "Creative")
         )
         if (damage > 0f && world.gameMode == "Survival") {
             player.health = (player.health - damage).coerceAtLeast(0f)
@@ -372,12 +380,19 @@ class GameViewModel : ViewModel() {
         }
 
         // 3. Scan & update active furnaces smelting operations
-        val mutableFurnaces = world.furnaceStates.toMutableMap()
+        var mutableFurnaces: MutableMap<String, FurnaceState>? = null
         var furnacesChanged = false
 
-        mutableFurnaces.forEach { (coord, furnace) ->
-            if (tickFurnace(furnace, world.worldBlocks)) {
-                furnacesChanged = true
+        if (world.furnaceStates.isNotEmpty()) {
+            world.furnaceStates.forEach { (coord, furnace) ->
+                val clonedFurnace = furnace.copy()
+                if (tickFurnace(clonedFurnace, world.worldBlocks)) {
+                    if (mutableFurnaces == null) {
+                        mutableFurnaces = world.furnaceStates.toMutableMap()
+                    }
+                    mutableFurnaces!![coord] = clonedFurnace
+                    furnacesChanged = true
+                }
             }
         }
 
@@ -398,7 +413,7 @@ class GameViewModel : ViewModel() {
 
         // Trigger updates to composables
         val updatedWorld = world.copy(
-            furnaceStates = if (furnacesChanged) mutableFurnaces else world.furnaceStates,
+            furnaceStates = if (furnacesChanged && mutableFurnaces != null) mutableFurnaces!! else world.furnaceStates,
             currentSkyTime = world.currentSkyTime
         )
         _activeWorld.value = updatedWorld
@@ -822,6 +837,16 @@ class GameViewModel : ViewModel() {
         }
         
         player.inventory[targetIndex] = ItemStack(itemId, count)
+        
+        val newWorld = world.copy(playerState = player)
+        _activeWorld.value = newWorld
+        WorldSaver.saveWorld(context, newWorld)
+    }
+
+    fun clearInventorySlot(context: Context, index: Int) {
+        val world = _activeWorld.value ?: return
+        val player = world.playerState
+        player.inventory[index] = null
         
         val newWorld = world.copy(playerState = player)
         _activeWorld.value = newWorld

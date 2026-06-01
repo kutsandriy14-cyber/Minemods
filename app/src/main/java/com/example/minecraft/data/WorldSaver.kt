@@ -42,7 +42,7 @@ object WorldSaver {
                 val json = f.readText()
                 val world = worldAdapter.fromJson(json)
                 if (world != null) {
-                    worlds.add(world)
+                    worlds.add(world.sanitize())
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error parsing world file ${f.name}", e)
@@ -62,10 +62,16 @@ object WorldSaver {
 
             // Safe alphanumeric name for file
             val safeName = world.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-            val file = File(dir, "$safeName.json")
+            val file = File(dir, "${safeName}_${world.creationTime}.json")
             
             val json = worldAdapter.toJson(world)
             file.writeText(json)
+
+            // Delete legacy file if we migrated it
+            val legacyFile = File(dir, "$safeName.json")
+            if (legacyFile.exists()) {
+                legacyFile.delete()
+            }
             Log.d(TAG, "Successfully saved world ${world.name} to ${file.absolutePath}")
         } catch (e: Exception) {
             Log.e(TAG, "Error saving world ${world.name}", e)
@@ -75,16 +81,19 @@ object WorldSaver {
     /**
      * Deletes a world save file.
      */
-    fun deleteWorld(context: Context, worldName: String) {
+    fun deleteWorld(context: Context, world: WorldSave) {
         try {
             val dir = File(context.filesDir, WORLDS_DIR)
-            val safeName = worldName.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-            val file = File(dir, "$safeName.json")
+            val safeName = world.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            var file = File(dir, "${safeName}_${world.creationTime}.json")
+            if (!file.exists()) {
+                file = File(dir, "$safeName.json")
+            }
             if (file.exists()) {
                 file.delete()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error deleting world $worldName", e)
+            Log.e(TAG, "Error deleting world ${world.name}", e)
         }
     }
 
@@ -333,3 +342,48 @@ object WorldSaver {
         )
     }
 }
+
+fun WorldSave.sanitize(): WorldSave {
+    val sName = (this.name as? String) ?: "World"
+    val sGameMode = (this.gameMode as? String) ?: "Survival"
+    val sWorldType = (this.worldType as? String) ?: "Standard"
+    
+    // Sanitize player state safely
+    val rawPlayer = this.playerState as com.example.minecraft.model.PlayerState?
+    val sPlayerState = if (rawPlayer != null) {
+        val rawInventory = rawPlayer.inventory as List<*>?
+        val sInventory = mutableListOf<com.example.minecraft.model.ItemStack?>()
+        if (rawInventory != null) {
+            for (item in rawInventory) {
+                if (item is com.example.minecraft.model.ItemStack) {
+                    sInventory.add(item)
+                } else {
+                    sInventory.add(null)
+                }
+            }
+        }
+        while (sInventory.size < 36) {
+            sInventory.add(null)
+        }
+        rawPlayer.copy(inventory = sInventory)
+    } else {
+        com.example.minecraft.model.PlayerState()
+    }
+
+    val sWorldBlocks = (this.worldBlocks as? Map<String, String>) ?: emptyMap()
+    val sFurnaceStates = (this.furnaceStates as? Map<String, com.example.minecraft.model.FurnaceState>) ?: emptyMap()
+    val sChestStates = (this.chestStates as? Map<String, com.example.minecraft.model.ChestState>) ?: emptyMap()
+    val sEnabledModIds = (this.enabledModIds as? List<String>) ?: emptyList()
+    
+    return this.copy(
+        name = sName,
+        gameMode = sGameMode,
+        worldType = sWorldType,
+        playerState = sPlayerState,
+        worldBlocks = sWorldBlocks,
+        furnaceStates = sFurnaceStates,
+        chestStates = sChestStates,
+        enabledModIds = sEnabledModIds
+    )
+}
+

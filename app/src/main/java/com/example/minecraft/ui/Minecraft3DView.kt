@@ -94,6 +94,32 @@ class Minecraft3DRenderer(
     private val texCoordArray = FloatArray(maxVertices * 2)
     private var vertexCount = 0
 
+    private val unitQuadBuffer: FloatBuffer = ByteBuffer.allocateDirect(4 * 3 * 4).run {
+        order(ByteOrder.nativeOrder())
+        asFloatBuffer().apply {
+            put(floatArrayOf(
+                -0.5f, -0.5f, 0.0f,
+                 0.5f, -0.5f, 0.0f,
+                 0.5f,  0.5f, 0.0f,
+                -0.5f,  0.5f, 0.0f
+            ))
+            position(0)
+        }
+    }
+
+    private val unitQuadTexBuffer: FloatBuffer = ByteBuffer.allocateDirect(4 * 2 * 4).run {
+        order(ByteOrder.nativeOrder())
+        asFloatBuffer().apply {
+            put(floatArrayOf(
+                0.0f, 1.0f,
+                1.0f, 1.0f,
+                1.0f, 0.0f,
+                0.0f, 0.0f
+            ))
+            position(0)
+        }
+    }
+
     override fun onSurfaceCreated(gl: GL10, config: EGLConfig) {
         // Configure basic OpenGL settings
         gl.glEnable(GL10.GL_DEPTH_TEST)
@@ -136,7 +162,8 @@ class Minecraft3DRenderer(
     }
 
     override fun onSurfaceChanged(gl: GL10, width: Int, height: Int) {
-        val aspect = width.toFloat() / height.toFloat()
+        val safeHeight = if (height <= 0) 1 else height
+        val aspect = width.toFloat() / safeHeight.toFloat()
         gl.glViewport(0, 0, width, height)
         gl.glMatrixMode(GL10.GL_PROJECTION)
         gl.glLoadIdentity()
@@ -252,8 +279,8 @@ class Minecraft3DRenderer(
             else -> 10 // "Medium"
         }
  
-        val startX = (centerGridX - renderRadX).coerceAtLeast(0)
-        val endX = (centerGridX + renderRadX).coerceAtMost(worldState.width - 1)
+        val startX = centerGridX - renderRadX
+        val endX = centerGridX + renderRadX
         val startY = (centerGridY - renderRadY).coerceAtLeast(0)
         val endY = (centerGridY + renderRadY).coerceAtMost(worldState.height - 1)
  
@@ -629,6 +656,10 @@ class Minecraft3DRenderer(
     }
 
     private fun drawCubeSkeleton(gl: GL10) {
+        // Safe binding of the static unit quad buffer
+        gl.glVertexPointer(3, GL10.GL_FLOAT, 0, unitQuadBuffer)
+        gl.glTexCoordPointer(2, GL10.GL_FLOAT, 0, unitQuadTexBuffer)
+
         // Draws a textured or solid scaled block cube
         // FRONT
         gl.glPushMatrix()
@@ -673,6 +704,8 @@ class Minecraft3DRenderer(
     }
 
     private fun draw3DStars(gl: GL10) {
+        gl.glVertexPointer(3, GL10.GL_FLOAT, 0, unitQuadBuffer)
+        gl.glTexCoordPointer(2, GL10.GL_FLOAT, 0, unitQuadTexBuffer)
         gl.glDisable(GL10.GL_TEXTURE_2D)
         gl.glDisable(GL10.GL_LIGHTING)
         gl.glColor4f(1f, 1f, 1f, 0.85f)
