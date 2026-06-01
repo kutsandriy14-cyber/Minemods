@@ -289,8 +289,9 @@ class Minecraft3DRenderer(
                  
                 if (isTerrain) {
                     for (bz in -terrainDepth..terrainDepth) {
-                        // Apply an organic, satisfying slope curvature downwards away from the center ridge at z=0
-                        val valeyCurvature = -0.06f * (bz * bz)
+                        // Apply an organic, satisfying rolling hill terrain wave along both X and Z depth axes (symmetrical at bz=0)
+                        val valeyCurvature = (Math.sin(bx * 0.04 + bz * 0.12) * 2.5f - Math.sin(bx * 0.04) * 2.5f).toFloat() + 
+                                             (Math.cos(bx * 0.08 + bz * 0.07) * 1.2f - Math.cos(bx * 0.08) * 1.2f).toFloat()
                          
                         // Sandwich check for depth slices
                         val drawBack = (bz == -terrainDepth)

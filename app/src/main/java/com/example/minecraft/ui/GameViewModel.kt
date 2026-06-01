@@ -714,7 +714,7 @@ class GameViewModel : ViewModel() {
 
         // Drop item stack
         val dropId = bType.dropItemId ?: blockId
-        if (dropId != "air") {
+        if (dropId != "air" && world.gameMode != "Creative") {
             addToInventory(dropId, bType.dropCount)
         }
 
@@ -787,6 +787,45 @@ class GameViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    fun toggleGameMode(context: Context, mode: String) {
+        val world = _activeWorld.value ?: return
+        val updatedWorld = world.copy(gameMode = mode)
+        _activeWorld.value = updatedWorld
+        WorldSaver.saveWorld(context, updatedWorld)
+    }
+
+    fun spawnCreativeItem(context: Context, itemId: String, count: Int) {
+        val world = _activeWorld.value ?: return
+        val player = world.playerState
+        
+        // Find existing stack or first empty slot
+        var targetIndex = -1
+        for (i in 0 until 36) {
+            val s = player.inventory[i]
+            if (s != null && s.itemId == itemId && s.count < 64) {
+                targetIndex = i
+                break
+            }
+        }
+        if (targetIndex == -1) {
+            for (i in 0 until 36) {
+                if (player.inventory[i] == null) {
+                    targetIndex = i
+                    break
+                }
+            }
+        }
+        if (targetIndex == -1) {
+            targetIndex = player.activeHotbarIndex
+        }
+        
+        player.inventory[targetIndex] = ItemStack(itemId, count)
+        
+        val newWorld = world.copy(playerState = player)
+        _activeWorld.value = newWorld
+        WorldSaver.saveWorld(context, newWorld)
     }
 
     private fun bTypeIsSolid(blockId: String): Boolean {

@@ -363,141 +363,162 @@ fun GameScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(world, camOffsetX, camOffsetY, tileSizePx) {
-                        detectTapGestures(
-                            onTap = { offset ->
-                                val hitVx = ((offset.x + camOffsetX) / tileSizePx).toInt()
-                                val hitVy = (world.height - ((offset.y + camOffsetY) / tileSizePx)).toInt()
+                    .pointerInput(world, camOffsetX, camOffsetY, tileSizePx, is3DMode, touchSensitivity) {
+                        awaitEachGesture {
+                            // Wait for the first pointer down
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val startPos = down.position
+                            val hitVx = ((startPos.x + camOffsetX) / tileSizePx).toInt()
+                            val hitVy = (world.height - ((startPos.y + camOffsetY) / tileSizePx)).toInt()
+                            val existingBlock = world.worldBlocks["$hitVx,$hitVy"] ?: "air"
+                            
+                            var isDragging = false
+                            var startMiningTriggered = false
+                            val downTime = System.currentTimeMillis()
+                            
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
                                 
-                                val existingBlock = world.worldBlocks["$hitVx,$hitVy"] ?: "air"
-                                if (existingBlock == "air") {
-                                    viewModel.forcePlaceBlock(context, hitVx, hitVy)
-                                } else if (existingBlock == "furnace" || existingBlock == "chest" || existingBlock == "crafter" || existingBlock == "vault" || existingBlock == "trial_spawner") {
-                                    viewModel.handleBlockInteraction(context, hitVx, hitVy)
-                                } else {
-                                    // Tapped on solid block -> Place ADJACENT to the clicked side like Pocket Edition
-                                    val clickRelX = (offset.x + camOffsetX) - (hitVx * tileSizePx)
-                                    val clickRelY = (offset.y + camOffsetY) - ((world.height - 1 - hitVy) * tileSizePx)
-                                    
-                                    var targetX = hitVx
-                                    var targetY = hitVy
-                                    
-                                    val distLeft = clickRelX
-                                    val distRight = tileSizePx - clickRelX
-                                    val distTop = clickRelY
-                                    val distBottom = tileSizePx - clickRelY
-                                    
-                                    val minDist = minOf(distLeft, distRight, distTop, distBottom)
-                                    when (minDist) {
-                                        distLeft -> targetX = hitVx - 1
-                                        distRight -> targetX = hitVx + 1
-                                        distTop -> targetY = hitVy + 1
-                                        distBottom -> targetY = hitVy - 1
+                                val currentPos = change.position
+                                val dragDistanceX = Math.abs(currentPos.x - startPos.x)
+                                val dragDistanceY = Math.abs(currentPos.y - startPos.y)
+                                if (dragDistanceX > 15f || dragDistanceY > 15f) {
+                                    isDragging = true
+                                }
+                                
+                                if (isDragging && !startMiningTriggered) {
+                                    // Swipe to rotate/look around
+                                    if (is3DMode) {
+                                        val prevPos = change.previousPosition
+                                        val dx = currentPos.x - prevPos.x
+                                        val dy = currentPos.y - prevPos.y
+                                        yawAngle = (yawAngle - dx * 0.22f * touchSensitivity) % 360f
+                                        pitchAngle = (pitchAngle - dy * 0.18f * touchSensitivity).coerceIn(-45f, 15f)
                                     }
-                                    
-                                    val targetBlock = world.worldBlocks["$targetX,$targetY"] ?: "air"
-                                    if (targetBlock == "air") {
-                                        viewModel.forcePlaceBlock(context, targetX, targetY)
-                                    } else {
-                                        // Top fallback
-                                        val topBlock = world.worldBlocks["$hitVx,${hitVy + 1}"] ?: "air"
-                                        if (topBlock == "air") {
-                                            viewModel.forcePlaceBlock(context, hitVx, hitVy + 1)
+                                }
+                                
+                                // Check for Hold block mining trigger (only if not dragged extensively)
+                                val elapsed = System.currentTimeMillis() - downTime
+                                if (elapsed >= 250L && !isDragging && !startMiningTriggered) {
+                                    if (existingBlock != "air" && existingBlock != "bedrock") {
+                                        startMiningTriggered = true
+                                        activeMiningX = hitVx
+                                        activeMiningY = hitVy
+                                        lastTouchX = startPos.x
+                                        lastTouchY = startPos.y
+                                        
+                                        miningJob?.cancel()
+                                        miningJob = coroutineScope.launch {
+                                            val bType = GameRegistry.blocks[existingBlock] ?: return@launch
+                                            val speed = if (world.gameMode == "Creative") 999f else viewModel.getToolMiningSpeed(player.inventory[player.activeHotbarIndex], existingBlock)
+                                            val totalTicks = (bType.hardness * 16f / speed).coerceAtLeast(3f)
+                                            var tick = 0f
+                                            
+                                            while (tick < totalTicks) {
+                                                delay(50)
+                                                tick += 1.0f
+                                                viewModel.setMiningProgress(tick / totalTicks)
+                                                
+                                                if (viewModel.particlesEnabled.value) {
+                                                    val bCol = Color(android.graphics.Color.parseColor(bType.colorHex))
+                                                    repeat((3 * viewModel.particleDensity.value).toInt()) {
+                                                        val px = lastTouchX + (Math.random().toFloat() - 0.5f) * 30f
+                                                        val py = lastTouchY + (Math.random().toFloat() - 0.5f) * 30f
+                                                        val vx = (Math.random().toFloat() - 0.5f) * 5f
+                                                        val vy = -2f - Math.random().toFloat() * 3f
+                                                        particles.add(BlockParticle(x = px, y = py, vx = vx, vy = vy, color = bCol))
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // Broken!
+                                            viewModel.mineBlockAction(context, hitVx, hitVy, existingBlock)
+                                            if (viewModel.particlesEnabled.value) {
+                                                val bCol = Color(android.graphics.Color.parseColor(bType.colorHex))
+                                                repeat((14 * viewModel.particleDensity.value).toInt()) {
+                                                    val vx = (Math.random().toFloat() - 0.5f) * 10f
+                                                    val vy = -4f - Math.random().toFloat() * 6f
+                                                    particles.add(BlockParticle(x = lastTouchX, y = lastTouchY, vx = vx, vy = vy, color = bCol))
+                                                }
+                                            }
+                                            
+                                            activeMiningX = -1
+                                            activeMiningY = -1
+                                            viewModel.resetMiningProgress()
                                         }
                                     }
                                 }
-                            }
-                        )
-                    }
-                    .pointerInput(world, camOffsetX, camOffsetY, tileSizePx) {
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                val hitVx = ((offset.x + camOffsetX) / tileSizePx).toInt()
-                                val hitVy = (world.height - ((offset.y + camOffsetY) / tileSizePx)).toInt()
-                                val existingBlock = world.worldBlocks["$hitVx,$hitVy"] ?: "air"
                                 
-                                if (existingBlock != "air" && existingBlock != "bedrock") {
-                                    activeMiningX = hitVx
-                                    activeMiningY = hitVy
-                                    lastTouchX = offset.x
-                                    lastTouchY = offset.y
+                                if (startMiningTriggered) {
+                                    lastTouchX = currentPos.x
+                                    lastTouchY = currentPos.y
+                                    val curHitVx = ((lastTouchX + camOffsetX) / tileSizePx).toInt()
+                                    val curHitVy = (world.height - ((lastTouchY + camOffsetY) / tileSizePx)).toInt()
                                     
-                                    miningJob?.cancel()
-                                    miningJob = coroutineScope.launch {
-                                        val bType = GameRegistry.blocks[existingBlock] ?: return@launch
-                                        val speed = viewModel.getToolMiningSpeed(player.inventory[player.activeHotbarIndex], existingBlock)
-                                        val totalTicks = (bType.hardness * 16f / speed).coerceAtLeast(3f)
-                                        var tick = 0f
-                                        
-                                        while (tick < totalTicks) {
-                                            delay(50) // 50ms ticks
-                                            tick += 1.0f
-                                            viewModel.setMiningProgress(tick / totalTicks)
-                                            
-                                            // Emit mining dust particles
-                                            if (viewModel.particlesEnabled.value) {
-                                                val bCol = Color(android.graphics.Color.parseColor(bType.colorHex))
-                                                repeat((3 * viewModel.particleDensity.value).toInt()) {
-                                                    val px = lastTouchX + (Math.random().toFloat() - 0.5f) * 30f
-                                                    val py = lastTouchY + (Math.random().toFloat() - 0.5f) * 30f
-                                                    val vx = (Math.random().toFloat() - 0.5f) * 5f
-                                                    val vy = -2f - Math.random().toFloat() * 3f
-                                                    particles.add(BlockParticle(x = px, y = py, vx = vx, vy = vy, color = bCol))
-                                                }
-                                            }
-                                        }
-                                        
-                                        // Block broken!
-                                        viewModel.mineBlockAction(context, hitVx, hitVy, existingBlock)
-                                        
-                                        // Exploding burst particles
-                                        if (viewModel.particlesEnabled.value) {
-                                            val bCol = Color(android.graphics.Color.parseColor(bType.colorHex))
-                                            repeat((14 * viewModel.particleDensity.value).toInt()) {
-                                                val vx = (Math.random().toFloat() - 0.5f) * 10f
-                                                val vy = -4f - Math.random().toFloat() * 6f
-                                                particles.add(BlockParticle(x = lastTouchX, y = lastTouchY, vx = vx, vy = vy, color = bCol))
-                                            }
-                                        }
-                                        
+                                    // If we moved off the target block, cancel mining
+                                    if (curHitVx != activeMiningX || curHitVy != activeMiningY) {
+                                        miningJob?.cancel()
                                         activeMiningX = -1
                                         activeMiningY = -1
                                         viewModel.resetMiningProgress()
+                                        startMiningTriggered = false
+                                        isDragging = true // Turn it back into a drag look gesture
                                     }
                                 }
-                            },
-                            onDragEnd = {
-                                miningJob?.cancel()
-                                activeMiningX = -1
-                                activeMiningY = -1
-                                viewModel.resetMiningProgress()
-                            },
-                            onDragCancel = {
-                                miningJob?.cancel()
-                                activeMiningX = -1
-                                activeMiningY = -1
-                                viewModel.resetMiningProgress()
-                            },
-                            onDrag = { change, dragAmount ->
-                                lastTouchX = change.position.x
-                                lastTouchY = change.position.y
                                 
-                                val hitVx = ((lastTouchX + camOffsetX) / tileSizePx).toInt()
-                                val hitVy = (world.height - ((lastTouchY + camOffsetY) / tileSizePx)).toInt()
-                                if (hitVx != activeMiningX || hitVy != activeMiningY) {
+                                // Finger lifted or gesture canceled
+                                if (!change.pressed) {
+                                    if (!startMiningTriggered && !isDragging) {
+                                        // True short tap action
+                                        val tapVx = ((currentPos.x + camOffsetX) / tileSizePx).toInt()
+                                        val tapVy = (world.height - ((currentPos.y + camOffsetY) / tileSizePx)).toInt()
+                                        val tapBlock = world.worldBlocks["$tapVx,$tapVy"] ?: "air"
+                                        
+                                        if (tapBlock == "air") {
+                                            viewModel.forcePlaceBlock(context, tapVx, tapVy)
+                                        } else if (tapBlock == "furnace" || tapBlock == "chest" || tapBlock == "crafter" || tapBlock == "vault" || tapBlock == "trial_spawner") {
+                                            viewModel.handleBlockInteraction(context, tapVx, tapVy)
+                                        } else {
+                                            // Tapped solid block -> Place ADJACENT to side clicked
+                                            val clickRelX = (currentPos.x + camOffsetX) - (tapVx * tileSizePx)
+                                            val clickRelY = (currentPos.y + camOffsetY) - ((world.height - 1 - tapVy) * tileSizePx)
+                                            var targetX = tapVx
+                                            var targetY = tapVy
+                                            val distLeft = clickRelX
+                                            val distRight = tileSizePx - clickRelX
+                                            val distTop = clickRelY
+                                            val distBottom = tileSizePx - clickRelY
+                                            val minDist = minOf(distLeft, distRight, distTop, distBottom)
+                                            when (minDist) {
+                                                distLeft -> targetX = tapVx - 1
+                                                distRight -> targetX = tapVx + 1
+                                                distTop -> targetY = tapVy + 1
+                                                distBottom -> targetY = tapVy - 1
+                                            }
+                                            val targetBlock = world.worldBlocks["$targetX,$targetY"] ?: "air"
+                                            if (targetBlock == "air") {
+                                                viewModel.forcePlaceBlock(context, targetX, targetY)
+                                            } else {
+                                                val topBlock = world.worldBlocks["$tapVx,${tapVy + 1}"] ?: "air"
+                                                if (topBlock == "air") {
+                                                    viewModel.forcePlaceBlock(context, hitVx, hitVy + 1)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Reset state on release
                                     miningJob?.cancel()
                                     activeMiningX = -1
                                     activeMiningY = -1
                                     viewModel.resetMiningProgress()
+                                    break
                                 }
                                 
-                                // Touch swipe-to-look camera rotation controls in 3D Mode
-                                if (is3DMode && activeMiningX == -1) {
-                                    yawAngle = (yawAngle - dragAmount.x * 0.22f * touchSensitivity) % 360f
-                                    pitchAngle = (pitchAngle - dragAmount.y * 0.18f * touchSensitivity).coerceIn(-45f, 15f)
-                                }
+                                change.consume()
                             }
-                        )
+                        }
                     }
             )
 
@@ -664,6 +685,16 @@ fun GameScreen(
                 MinecraftButton(
                     text = if (is3DMode) "Switch 2D" else "Switch 3D",
                     onClick = { is3DMode = !is3DMode },
+                    modifier = Modifier.height(34.dp)
+                )
+
+                // Creative / Survival mode button toggle
+                MinecraftButton(
+                    text = if (world.gameMode == "Creative") "Creative" else "Survival",
+                    onClick = {
+                        val nextMode = if (world.gameMode == "Creative") "Survival" else "Creative"
+                        viewModel.toggleGameMode(context, nextMode)
+                    },
                     modifier = Modifier.height(34.dp)
                 )
 
@@ -1129,6 +1160,47 @@ fun GameScreen(
                                                     Text("${stack.count}", color = Color.White, fontSize = 8.sp, modifier = Modifier.align(Alignment.BottomEnd))
                                                 }
                                             }
+                                        }
+                                    }
+                                }
+                            } else if (world.gameMode == "Creative") {
+                                // CREATIVE BLOCKS PALETTE
+                                Text("CREATIVE PALETTE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                Text("Tap item to spawn 64 in slot!", color = Color.Gray, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                val allRegistryItems = remember {
+                                    GameRegistry.items.values.sortedBy { !it.isBlock }
+                                }
+
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(3),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.fillMaxWidth().weight(1f)
+                                ) {
+                                    items(allRegistryItems.size) { index ->
+                                        val itemType = allRegistryItems[index]
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(Color(0xFF1A1A1A))
+                                                .border(1.dp, Color(0xFF333333))
+                                                .clickable {
+                                                    viewModel.spawnCreativeItem(context, itemType.id, 64)
+                                                }
+                                                .padding(4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(modifier = Modifier.size(14.dp).background(itemType.getColor()))
+                                            Text(
+                                                text = itemType.name,
+                                                color = Color.White,
+                                                fontSize = 8.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                maxLines = 1
+                                            )
                                         }
                                     }
                                 }
