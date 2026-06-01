@@ -68,9 +68,34 @@ class GameViewModel : ViewModel() {
 
     // Block mining state
     private val _miningCoord = MutableStateFlow<String?>(null)
-    val miningCoord: StateFlow<String?> = _openFurnaceCoord.asStateFlow() // reusable
+    val miningCoord: StateFlow<String?> = _openFurnaceCoord.asStateFlow()
     private val _miningProgress = MutableStateFlow(0f) // 0.0 to 1.0f
     val miningProgress: StateFlow<Float> = _miningProgress.asStateFlow()
+
+    // --- GAME OPTIONS & GUI SETTINGS (Particles, UI, Performance) ---
+    val particlesEnabled = MutableStateFlow(true)
+    val particleDensity = MutableStateFlow(1.0f) // 0.5f = Low, 1.0f = Medium, 1.5f = High
+    val renderDistanceSetting = MutableStateFlow("Medium") // "Low", "Medium", "High"
+    val isFirstPersonSetting = MutableStateFlow(true)
+    val buttonSizeMultiplier = MutableStateFlow(1.00f) // 0.8f = Small, 1.0f = Normal, 1.25f = Large
+    val touchSensitivity = MutableStateFlow(1.0f)
+    val soundEffectsEnabled = MutableStateFlow(true)
+
+    fun updateParticlesEnabled(enabled: Boolean) { particlesEnabled.value = enabled }
+    fun updateParticleDensity(density: Float) { particleDensity.value = density }
+    fun updateRenderDistance(level: String) { renderDistanceSetting.value = level }
+    fun updateFirstPerson(enabled: Boolean) { isFirstPersonSetting.value = enabled }
+    fun updateButtonMultiplier(multiplier: Float) { buttonSizeMultiplier.value = multiplier }
+    fun updateTouchSensitivity(sens: Float) { touchSensitivity.value = sens }
+    fun updateSoundEnabled(enabled: Boolean) { soundEffectsEnabled.value = enabled }
+
+    fun setMiningProgress(progress: Float) {
+        _miningProgress.value = progress
+    }
+
+    fun resetMiningProgress() {
+        _miningProgress.value = 0f
+    }
 
     // Game loop control
     private var gameLoopJob: Job? = null
@@ -179,8 +204,8 @@ class GameViewModel : ViewModel() {
             enabledModIds = activeMods.map { it.id }
         )
 
-        // Find a safe spawn Y (top surface above grass block near X=50)
-        val spawnX = 50
+        // Find a safe spawn Y (top surface above grass block near X=50000)
+        val spawnX = 50000
         var spawnY = 15f
         for (y in (44) downTo 0) {
             val key = "$spawnX,$y"
@@ -196,7 +221,9 @@ class GameViewModel : ViewModel() {
         val freshWorld = WorldSave(
             name = name,
             seed = seed,
+            width = 100000,
             gameMode = mode,
+            worldType = terrainType,
             playerState = PlayerState(
                 x = spawnX.toFloat(),
                 y = spawnY,
@@ -221,7 +248,31 @@ class GameViewModel : ViewModel() {
             }
         }
 
-        _activeWorld.value = save
+        // Auto-upgrade width to 100000 and adjust player position if it was 200
+        val upgradedSave = if (save.width < 1000) {
+            val offset = 50000 - 50
+            val upgradedBlocks = mutableMapOf<String, String>()
+            save.worldBlocks.forEach { (coord, blockId) ->
+                val parts = coord.split(",")
+                if (parts.size == 2) {
+                    val originalX = parts[0].toIntOrNull() ?: 0
+                    val y = parts[1]
+                    val newX = originalX + offset
+                    upgradedBlocks["$newX,$y"] = blockId
+                }
+            }
+            save.copy(
+                width = 100000,
+                playerState = save.playerState.copy(
+                    x = save.playerState.x + offset
+                ),
+                worldBlocks = upgradedBlocks
+            )
+        } else {
+            save
+        }
+
+        _activeWorld.value = upgradedSave
         _isPaused.value = false
         _inventoryOpen.value = false
         _openFurnaceCoord.value = null
@@ -255,11 +306,38 @@ class GameViewModel : ViewModel() {
     }
 
     private fun tickGameEngine(context: Context) {
-        val world = _activeWorld.value ?: return
+        var world = _activeWorld.value ?: return
         val player = world.playerState
 
         // 1. Tick Day/Night Sky time
         world.currentSkyTime = (world.currentSkyTime + 1.0f) % 24000
+        
+        // 1.5. Dynamic Endless world block generation chunk trigger
+        val playerXInt = player.x.toInt()
+        val checkRadius = 60
+        var worldChanged = false
+        val mutableBlocks = world.worldBlocks.toMutableMap()
+        
+        for (x in (playerXInt - checkRadius)..(playerXInt + checkRadius)) {
+            if (x in 2 until world.width - 2) {
+                val sentinelKey = "$x,0"
+                if (!mutableBlocks.containsKey(sentinelKey)) {
+                    val columnBlocks = TerrainGenerator.generateColumn(
+                        x = x,
+                        seed = world.seed,
+                        height = world.height,
+                        worldType = world.worldType,
+                        enabledModIds = world.enabledModIds
+                    )
+                    mutableBlocks.putAll(columnBlocks)
+                    worldChanged = true
+                }
+            }
+        }
+        if (worldChanged) {
+            world = world.copy(worldBlocks = mutableBlocks)
+            _activeWorld.value = world
+        }
         
         // 2. Apply player physics & movement via joystick / d-pad
         val damage = PhysicsEngine.updatePlayer(
@@ -342,13 +420,13 @@ class GameViewModel : ViewModel() {
             }
             
             // Reset coordinates to top surface spawn
-            player.x = 50f
+            player.x = 50000f
             player.velocityY = 0f
             player.velocityX = 0f
             
             var ySurface = 15f
             for (y in (world.height - 1) downTo 0) {
-                val key = "50,$y"
+                val key = "50000,$y"
                 if (world.worldBlocks.containsKey(key)) {
                     val bId = world.worldBlocks[key]
                     if (bId != "air" && bTypeIsSolid(bId ?: "air")) {
@@ -623,7 +701,7 @@ class GameViewModel : ViewModel() {
         }
     }
 
-    private fun mineBlockAction(context: Context, bx: Int, by: Int, blockId: String) {
+    fun mineBlockAction(context: Context, bx: Int, by: Int, blockId: String) {
         val world = _activeWorld.value ?: return
         val player = world.playerState
         val blockKey = "$bx,$by"
@@ -656,7 +734,7 @@ class GameViewModel : ViewModel() {
         WorldSaver.saveWorld(context, newWorld)
     }
 
-    private fun getToolMiningSpeed(toolStack: ItemStack?, targetBlockId: String): Float {
+    fun getToolMiningSpeed(toolStack: ItemStack?, targetBlockId: String): Float {
         val bType = GameRegistry.blocks[targetBlockId] ?: return 1.0f
         val tItem = toolStack?.let { GameRegistry.items[it.itemId] } ?: return 1.0f
 
@@ -673,6 +751,42 @@ class GameViewModel : ViewModel() {
         }
 
         return tItem.efficiency
+    }
+
+    fun forcePlaceBlock(context: Context, bx: Int, by: Int) {
+        val world = _activeWorld.value ?: return
+        val player = world.playerState
+        val blockKey = "$bx,$by"
+
+        // Validate player interaction range (4.5 block radius)
+        val distance = Math.hypot((player.x - bx).toDouble(), (player.y - by).toDouble())
+        if (distance > 4.5) return // Reach limit
+
+        val existingBlock = world.worldBlocks[blockKey] ?: "air"
+        if (existingBlock == "air") {
+            val selectedItem = player.inventory[player.activeHotbarIndex] ?: return
+            
+            // Ensure item is block
+            val iType = GameRegistry.items[selectedItem.itemId]
+            if (iType != null && iType.isBlock && iType.blockId != null) {
+                val isSolid = bTypeIsSolid(iType.blockId)
+                val overlapsPlayer = isSolid && PhysicsEngine.checkCollision(player.x, player.y, mapOf(blockKey to iType.blockId))
+                if (!overlapsPlayer) {
+                    val mutableBlocks = world.worldBlocks.toMutableMap()
+                    mutableBlocks[blockKey] = iType.blockId
+                    
+                    if (world.gameMode == "Survival") {
+                        selectedItem.count--
+                        if (selectedItem.count <= 0) {
+                            player.inventory[player.activeHotbarIndex] = null
+                        }
+                    }
+                    val newWorld = world.copy(worldBlocks = mutableBlocks)
+                    _activeWorld.value = newWorld
+                    WorldSaver.saveWorld(context, newWorld)
+                }
+            }
+        }
     }
 
     private fun bTypeIsSolid(blockId: String): Boolean {
@@ -700,7 +814,49 @@ class GameViewModel : ViewModel() {
 
         if (existing == null) {
             val mutableChests = world.chestStates.toMutableMap()
-            mutableChests[coord] = ChestState()
+            val newChest = ChestState()
+            
+            // Generate procedural structure loot depending on location
+            val parts = coord.split(",")
+            if (parts.size == 2) {
+                val bx = parts[0].toIntOrNull() ?: 0
+                val rand = java.util.Random((world.seed + bx).toLong())
+                
+                val houseInterval = 140
+                val houseCx = ((bx - 70).toFloat() / houseInterval.toFloat()).let { java.lang.Math.round(it) } * houseInterval + 70
+                val isVillageChest = Math.abs(bx - houseCx) <= 3
+                
+                val pyramidInterval = 320
+                val pyramidCx = ((bx - 160).toFloat() / pyramidInterval.toFloat()).let { java.lang.Math.round(it) } * pyramidInterval + 160
+                val isPyramidChest = Math.abs(bx - pyramidCx) <= 4
+
+                if (isVillageChest) {
+                    // Populate village loot
+                    newChest.slots[0] = ItemStack("apple", rand.nextInt(4) + 2)
+                    newChest.slots[1] = ItemStack("oak_log", rand.nextInt(12) + 4)
+                    newChest.slots[2] = ItemStack("iron_ingot", rand.nextInt(3) + 1)
+                    newChest.slots[4] = ItemStack("coal", rand.nextInt(8) + 2)
+                    if (rand.nextFloat() < 0.25f) {
+                        newChest.slots[8] = ItemStack("trial_key", 1)
+                    }
+                } else if (isPyramidChest) {
+                    // Populate desert pyramid treasure loot!
+                    newChest.slots[0] = ItemStack("diamond", rand.nextInt(3) + 1)
+                    newChest.slots[2] = ItemStack("gold_block", rand.nextInt(2) + 1)
+                    newChest.slots[4] = ItemStack("mace", 1)
+                    newChest.slots[8] = ItemStack("mod_ic2_uranium_rod", rand.nextInt(2) + 1)
+                    newChest.slots[12] = ItemStack("trial_key", rand.nextInt(2) + 1)
+                    if (rand.nextFloat() < 0.35f) {
+                        newChest.slots[15] = ItemStack("mod_ic2_nano_saber", 1)
+                    }
+                } else {
+                    // Random wilderness chest loot
+                    newChest.slots[0] = ItemStack("cobblestone", rand.nextInt(20) + 10)
+                    newChest.slots[4] = ItemStack("stick", rand.nextInt(6) + 2)
+                }
+            }
+            
+            mutableChests[coord] = newChest
             _activeWorld.value = world.copy(chestStates = mutableChests)
         }
         _openChestCoord.value = coord

@@ -248,9 +248,23 @@ class Minecraft3DRenderer(
         val centerGridX = player.x.toInt()
         val centerGridY = player.y.toInt()
 
-        // Render standard chunks width radius (e.g. 15 blocks horizontal, 11 blocks vertical)
-        val renderRadX = 14
-        val renderRadY = 11
+        // Render dynamic chunk slices depending on chosen Render Distance
+        val rDist = viewModel.renderDistanceSetting.value
+        val renderRadX = when (rDist) {
+            "Low" -> 6
+            "High" -> 18
+            else -> 12 // "Medium"
+        }
+        val renderRadY = when (rDist) {
+            "Low" -> 5
+            "High" -> 14
+            else -> 10 // "Medium"
+        }
+        val terrainDepth = when (rDist) {
+            "Low" -> 1
+            "High" -> 3
+            else -> 2 // "Medium"
+        }
 
         val startX = (centerGridX - renderRadX).coerceAtLeast(0)
         val endX = (centerGridX + renderRadX).coerceAtMost(worldState.width - 1)
@@ -288,13 +302,13 @@ class Minecraft3DRenderer(
                 val isRightSolid = rightId != "air" && rightId != "copper_grate" && rightId != "trial_spawner"
                 
                 if (isTerrain) {
-                    for (bz in -3..3) {
+                    for (bz in -terrainDepth..terrainDepth) {
                         // Apply an organic, satisfying slope curvature downwards away from the center ridge at z=0
                         val valeyCurvature = -0.16f * (bz * bz)
                         
                         // Sandwich check for depth slices
-                        val drawBack = (bz == -3)
-                        val drawFront = (bz == 3)
+                        val drawBack = (bz == -terrainDepth)
+                        val drawFront = (bz == terrainDepth)
                         
                         val aboveType = GameRegistry.blocks[aboveId]
                         val belowType = GameRegistry.blocks[belowId]
@@ -315,9 +329,10 @@ class Minecraft3DRenderer(
                     }
                 } else if (bId == "oak_log" || bId == "mangrove_log" || bId == "cherry_log") {
                     // Thick rounded cylindrical tree trunk (thickness 3)
-                    for (bz in -1..1) {
-                        val drawBack = (bz == -1)
-                        val drawFront = (bz == 1)
+                    val logDepth = terrainDepth.coerceAtMost(1)
+                    for (bz in -logDepth..logDepth) {
+                        val drawBack = (bz == -logDepth)
+                        val drawFront = (bz == logDepth)
                         val drawTop = !isAboveSolid
                         val drawBottom = !isBelowSolid
                         val drawLeft = !isLeftSolid
@@ -332,10 +347,11 @@ class Minecraft3DRenderer(
                     }
                 } else if (bId == "oak_leaves" || bId == "cherry_leaves") {
                     // Volumetric leaf canopy (thickness 5)
-                    for (bz in -2..2) {
-                        val slope = if (Math.abs(bz) == 2) -0.15f else 0f
-                        val drawBack = (bz == -2)
-                        val drawFront = (bz == 2)
+                    val leafDepth = terrainDepth.coerceAtMost(2)
+                    for (bz in -leafDepth..leafDepth) {
+                        val slope = if (Math.abs(bz) == leafDepth && leafDepth > 1) -0.15f else 0f
+                        val drawBack = (bz == -leafDepth)
+                        val drawFront = (bz == leafDepth)
                         val drawTop = !isAboveSolid
                         val drawBottom = !isBelowSolid
                         val drawLeft = !isLeftSolid
@@ -642,6 +658,15 @@ class Minecraft3DRenderer(
             }
             "oak_leaves" -> Pair(6, 0)
             "coal_ore" -> Pair(7, 0)
+            "netherrack" -> Pair(8, 0)
+            "soul_sand" -> Pair(9, 0)
+            "glowstone" -> Pair(10, 0)
+            "end_stone" -> Pair(11, 0)
+            "purpur_block" -> Pair(12, 0)
+            "chorus_flower" -> Pair(13, 0)
+            "sand" -> Pair(14, 0)
+            "sandstone" -> Pair(15, 0)
+
             "iron_ore" -> Pair(0, 1)
             "diamond_ore" -> Pair(1, 1)
             "obsidian" -> Pair(2, 1)
@@ -654,6 +679,15 @@ class Minecraft3DRenderer(
                 "front" -> Pair(6, 1)
                 else -> Pair(7, 1)
             }
+            "netherite_block" -> Pair(8, 1)
+            "crying_obsidian" -> Pair(9, 1)
+            "ancient_debris" -> Pair(10, 1)
+            "deepslate" -> Pair(11, 1)
+            "sculk" -> Pair(12, 1)
+            "sculk_sensor" -> Pair(13, 1)
+            "amethyst_block" -> Pair(14, 1)
+            "prismarine" -> Pair(15, 1)
+
             "chest" -> Pair(0, 2)
             "nano_banana_2" -> Pair(1, 2) // Bright shining banana texture!
             "crafter" -> Pair(2, 2)
@@ -667,6 +701,33 @@ class Minecraft3DRenderer(
             "copper_ore" -> Pair(10, 2)
             "tuff_bricks" -> Pair(11, 2)
             "chiseled_tuff" -> Pair(12, 2)
+            "cherry_log" -> when (face) {
+                "top", "bottom" -> Pair(5, 0)
+                else -> Pair(13, 2)
+            }
+            "cherry_leaves" -> Pair(14, 2)
+            "redstone_block" -> Pair(15, 2)
+
+            "sea_lantern" -> Pair(0, 3)
+            "beehive" -> Pair(1, 3)
+            "sponge" -> Pair(2, 3)
+            "magma_block" -> Pair(3, 3)
+            "lapis_block" -> Pair(4, 3)
+            "emerald_block" -> Pair(5, 3)
+            "gold_block" -> Pair(6, 3)
+            "iron_block" -> Pair(7, 3)
+            "diamond_block" -> Pair(8, 3)
+            "mud" -> Pair(9, 3)
+            "mangrove_log" -> when (face) {
+                "top", "bottom" -> Pair(5, 0)
+                else -> Pair(10, 3)
+            }
+            "blackstone" -> Pair(11, 3)
+            "honey_block" -> Pair(12, 3)
+            "honeycomb_block" -> Pair(13, 3)
+            "froglight" -> Pair(14, 3)
+            "barrel" -> Pair(15, 3)
+
             else -> {
                 if (blockId.contains("banana") || blockId.startsWith("mod_")) {
                     Pair(1, 2) // Custom or modded targets fallback to yellow nano banana
@@ -708,18 +769,18 @@ class Minecraft3DRenderer(
     }
 
     private fun generateProceduralAtlas(): Bitmap {
-        val size = 256
+        val size = 512
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint()
 
-        // 1. Fill entire base
+        // Fill background transparency
         paint.color = AndroidColor.TRANSPARENT
         canvas.drawRect(0f, 0f, size.toFloat(), size.toFloat(), paint)
 
         val tiles = 16
-        val tilePx = 16
-        val rand = Random(42) // Stabilize noise
+        val tilePx = 32
+        val rand = Random(42) // Stabilize texture seed
 
         for (ty in 0 until tiles) {
             for (tx in 0 until tiles) {
@@ -745,348 +806,343 @@ class Minecraft3DRenderer(
     }
 
     private fun determinePixelColor(tileX: Int, tileY: Int, px: Int, py: Int, rand: Random): Int {
-        // Match tile index to generate visual voxel graphics procedurally
-        val noise = (rand.nextFloat() * 16 - 8).toInt()
+        val tilePx = 32
+        val x16 = (px * 16) / tilePx
+        val y16 = (py * 16) / tilePx
 
-        return when {
-            // TILE (0,0): Grass Top (Rich leafy green)
-            tileX == 0 && tileY == 0 -> {
-                val baseG = 130 + noise
-                val baseR = 70 + noise / 2
-                val baseB = 40 + noise / 3
-                AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), baseB.coerceIn(0, 255))
-            }
+        val coarseNoise = (rand.nextFloat() * 14 - 7).toInt()
+        val fineNoise = (rand.nextFloat() * 6 - 3).toInt()
+        val noise = coarseNoise + fineNoise
 
-            // TILE (1,0): Grass Side (Turf transition)
-            tileX == 1 && tileY == 0 -> {
-                if (py < 4 + rand.nextInt(3)) {
-                    // Green turf fringe
-                    val baseG = 120 + noise
-                    val baseR = 65 + noise / 2
-                    AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), 45)
-                } else {
-                    // Earth Brown base
-                    val baseR = 110 + noise
-                    val baseG = 75 + noise
-                    AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), 50)
-                }
-            }
+        // Tactile 3D Bevel shading modifiers
+        var bevelModifier = 0
+        if (px == 0 || py == 0 || (px == 1 && py in 1..30) || (py == 1 && px in 1..30)) {
+            bevelModifier = 18  // Distinct sunny top-left glow
+        } else if (px == tilePx - 1 || py == tilePx - 1 || (px == tilePx - 2 && py in 1..30) || (py == tilePx - 2 && px in 1..30)) {
+            bevelModifier = -25 // Strong 3D ambient shadow border
+        }
 
-            // TILE (2,0): Dirt
-            tileX == 2 && tileY == 0 -> {
-                val baseR = 120 + noise
-                val baseG = 80 + noise
-                val baseB = 52 + noise
-                AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), baseB.coerceIn(0, 255))
-            }
+        // Color builder applying bevel and safe byte-clamps
+        fun col(r: Int, g: Int, b: Int, alpha: Int = 255): Int {
+            val finalR = (r + bevelModifier).coerceIn(0, 255)
+            val finalG = (g + bevelModifier).coerceIn(0, 255)
+            val finalB = (b + bevelModifier).coerceIn(0, 255)
+            return AndroidColor.argb(alpha, finalR, finalG, finalB)
+        }
 
-            // TILE (3,0): Stone (Cold granite slate grey)
-            tileX == 3 && tileY == 0 -> {
-                val grey = 135 + noise * 2
-                AndroidColor.rgb(grey.coerceIn(0, 255), grey.coerceIn(0, 255), grey.coerceIn(0, 255))
-            }
-
-            // TILE (4,0): Oak Log Side (Tree bark fibers)
-            tileX == 4 && tileY == 0 -> {
-                val isBarkStripe = px % 4 == 0 || py % 6 == 0
-                val colorAdd = if (isBarkStripe) -20 else 10
-                val baseR = 90 + noise + colorAdd
-                val baseG = 65 + noise + colorAdd
-                AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), 40)
-            }
-
-            // TILE (5,0): Oak Log Top (Circular rings)
-            tileX == 5 && tileY == 0 -> {
-                val dx = Math.abs(px - 7.5)
-                val dy = Math.abs(py - 7.5)
-                val dist = Math.sqrt(dx * dx + dy * dy)
-                val isRing = dist.toInt() % 3 == 0
-                if (isRing) {
-                    AndroidColor.rgb(180 + noise, 130 + noise, 80)
-                } else {
-                    AndroidColor.rgb(225 + noise, 185 + noise, 120)
-                }
-            }
-
-            // TILE (6,0): Oak Leaves
-            tileX == 6 && tileY == 0 -> {
-                // High frequency leafy clusters with transparency
-                val isHole = (px + py) % 7 == 0 && (px * py) % 3 == 1
-                if (isHole) {
-                    AndroidColor.TRANSPARENT
-                } else {
-                    val green = 90 + noise * 4
-                    AndroidColor.rgb(40, green.coerceIn(0, 255), 25)
-                }
-            }
-
-            // TILE (7,0): Coal Ore
-            tileX == 7 && tileY == 0 -> {
-                val isCoalVein = (px in 3..7 && py in 3..6) || (px in 10..13 && py in 8..12)
-                if (isCoalVein) {
-                    AndroidColor.rgb(38, 38, 38)
-                } else {
-                    val grey = 135 + noise * 2
-                    AndroidColor.rgb(grey.coerceIn(0, 255), grey.coerceIn(0, 255), grey.coerceIn(0, 255))
-                }
-            }
-
-            // TILE (0,1): Iron Ore
-            tileX == 0 && tileY == 1 -> {
-                val isIronVein = (px + py) % 5 == 1 && px in 2..13 && py in 2..13
-                if (isIronVein) {
-                    AndroidColor.rgb(212, 142, 107) // Classic 1.21.1 Iron Peach-Rust color
-                } else {
-                    val grey = 135 + noise * 2
-                    AndroidColor.rgb(grey.coerceIn(0, 255), grey.coerceIn(0, 255), grey.coerceIn(0, 255))
-                }
-            }
-
-            // TILE (1,1): Diamond Ore (Luminous cyber blue)
-            tileX == 1 && tileY == 1 -> {
-                val isDiaVein = (px + py) % 4 == 0 && px in 3..12 && py in 3..12
-                if (isDiaVein) {
-                    AndroidColor.rgb(78, 222, 236)
-                } else {
-                    val grey = 135 + noise * 2
-                    AndroidColor.rgb(grey.coerceIn(0, 255), grey.coerceIn(0, 255), grey.coerceIn(0, 255))
-                }
-            }
-
-            // TILE (2,1): Obsidian (Deep dark runic purple)
-            tileX == 2 && tileY == 1 -> {
-                val purple = 24 + noise / 2
-                val blueTone = 38 + noise
-                AndroidColor.rgb(purple.coerceIn(10, 80), 12, blueTone.coerceIn(15, 110))
-            }
-
-            // TILE (3,1): Bedrock (Rugged matrix)
-            tileX == 3 && tileY == 1 -> {
-                val density = if ((px * py) % 2 == 0) 35 else 90
-                val col = density + noise
-                AndroidColor.rgb(col.coerceIn(0, 255), col.coerceIn(0, 255), col.coerceIn(0, 255))
-            }
-
-            // TILE (4,1): Crafting Table Top
-            tileX == 4 && tileY == 1 -> {
-                val isBorder = px < 2 || px > 13 || py < 2 || py > 13
-                if (isBorder) {
-                    AndroidColor.rgb(100 + noise, 75 + noise, 45)
-                } else {
-                    AndroidColor.rgb(160 + noise, 120 + noise, 75)
-                }
-            }
-
-            // TILE (5,1): Crafting Table Side
-            tileX == 5 && tileY == 1 -> {
-                val baseR = 130 + noise
-                val baseG = 95 + noise
-                AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), 58)
-            }
-
-            // TILE (6,1): Furnace Front (Combustive blazing chamber)
-            tileX == 6 && tileY == 1 -> {
-                val isOpening = px in 3..12 && py in 4..11
-                if (isOpening) {
-                    // Dynamic fire gradient
-                    if (py > 7) {
-                        AndroidColor.rgb(255, 120 + noise * 2, 0) // Fire orange
-                    } else {
-                        AndroidColor.rgb(240, 230, 45) // Yellow
+        when (tileY) {
+            0 -> when (tileX) {
+                // TILE (0,0): Grass Top (rich meadow green with wildflowers!)
+                0 -> {
+                    val isFlower = (px in 6..8 && py in 6..8) || (px in 22..24 && py in 20..22)
+                    if (isFlower) {
+                        return if (rand.nextBoolean()) col(255, 235, 90) else col(245, 110, 165)
                     }
-                } else {
-                    val grey = 100 + noise
-                    AndroidColor.rgb(grey.coerceIn(0, 255), grey.coerceIn(0, 255), grey.coerceIn(0, 255))
+                    val grassFibre = (Math.sin(px * 0.7) * Math.cos(py * 0.7) * 16).toInt()
+                    return col(75 + noise / 2 + grassFibre, 150 + noise + grassFibre, 42)
                 }
-            }
-
-            // TILE (7,1): Furnace Side
-            tileX == 7 && tileY == 1 -> {
-                val grey = 110 + noise
-                AndroidColor.rgb(grey.coerceIn(0, 255), grey.coerceIn(0, 255), grey.coerceIn(0, 255))
-            }
-
-            // TILE (0,2): Chest Side and details
-            tileX == 0 && tileY == 2 -> {
-                val isClasp = px in 7..8 && py in 5..7
-                if (isClasp) {
-                    AndroidColor.rgb(215, 190, 40) // Golden lock
-                } else {
-                    val baseR = 100 + noise
-                    val baseG = 65 + noise
-                    AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), 35)
-                }
-            }
-
-            // TILE (1,2): NANO BANANA 2 (Gold-yellow pixel-perfect banana curve on cyber-blue mesh)
-            tileX == 1 && tileY == 2 -> {
-                // Determine banana curvature
-                // A banana is roughly outline-shaped like a crescent shape: py in 4..12, px curved
-                val isBanana = (py == 4 && px in 8..11) ||
-                              (py == 5 && px in 6..10) ||
-                              (py == 6 && px in 5..8) ||
-                              (py == 7 && px in 4..7) ||
-                              (py == 8 && px in 4..6) ||
-                              (py == 9 && px in 3..6) ||
-                              (py == 10 && px in 4..7) ||
-                              (py == 11 && px in 5..9) ||
-                              (py == 12 && px in 7..11)
-
-                if (isBanana) {
-                    // Golden cyber yellow
-                    AndroidColor.rgb(255, 215, 0)
-                } else {
-                    // Cyber cyan network grid background
-                    val isGrid = px % 4 == 0 || py % 4 == 0
-                    if (isGrid) {
-                        AndroidColor.rgb(0, 215, 255) // Cyber neon cyan
+                // TILE (1,0): Grass Side (hanging pasture turf)
+                1 -> {
+                    val grassHeight = 9 + (Math.sin(px.toDouble() * 0.7) * 4).toInt() + rand.nextInt(3)
+                    if (py < grassHeight) {
+                        val grassFibre = (Math.sin(px.toDouble() * 0.8) * 12).toInt()
+                        return col(65 + noise / 2 + grassFibre, 140 + noise + grassFibre, 38)
                     } else {
-                        AndroidColor.rgb(10, 16, 28) // Deep digital navy
+                        return col(115 + noise, 78 + noise, 52)
                     }
                 }
-            }
-
-            // TILE (2,2): CRAFTER
-            tileX == 2 && tileY == 2 -> {
-                val isRedmouth = px in 5..10 && py in 5..8
-                val isRedstoneRed = px % 5 == 1 || py % 5 == 1
-                if (isRedmouth) {
-                    AndroidColor.rgb(217, 74, 26) // Glowing redstone orange/red
-                } else if (isRedstoneRed) {
-                    AndroidColor.rgb(100, 40, 30) // Redstone conduit
-                } else {
-                    val base = 110 + noise
-                    AndroidColor.rgb(base, base, base) // Raw smooth slab grey
+                // TILE (2,0): Soil/Dirt
+                2 -> return col(118 + noise, 78 + noise, 52)
+                // TILE (3,0): Stone (rugged structure granite slate)
+                3 -> {
+                    val isQuartz = (px * 3 + py * 5) % 19 == 0
+                    if (isQuartz) return col(205 + noise, 205 + noise, 215)
+                    return col(128 + noise * 2, 128 + noise * 2, 128 + noise * 2)
+                }
+                // TILE (4,0): Oak Log Side
+                4 -> {
+                    val isGroove = px % 6 == 0 || py % 8 == 0
+                    val add = if (isGroove) -28 else 10
+                    return col(90 + noise + add, 62 + noise + add, 42)
+                }
+                // TILE (5,0): Oak Log Top (wooden grain rings)
+                5 -> {
+                    val r = Math.sqrt(((px - 15.5) * (px - 15.5) + (py - 15.5) * (py - 15.5)))
+                    val isRing = r.toInt() % 6 == 0 || r.toInt() % 6 == 1
+                    return if (isRing) col(170 + noise, 120 + noise, 70) else col(218 + noise, 185 + noise, 120)
+                }
+                // TILE (6,0): Oak Leaves
+                6 -> {
+                    val isHole = (px + py) % 9 == 0 && (px * py) % 3 == 0
+                    if (isHole) return AndroidColor.TRANSPARENT
+                    val leafy = (Math.sin(px * 1.4) * Math.cos(py * 1.4) * 22).toInt()
+                    return col(38 + leafy, 110 + noise + leafy, 28)
+                }
+                // TILE (7,0): Coal Ore
+                7 -> {
+                    val isCoal = Math.abs(px - 16) + Math.abs(py - 16) < 9 || (px % 12 == 1 && py % 10 == 1)
+                    if (isCoal) return col(32 + noise, 32 + noise, 32 + noise)
+                    return col(128 + noise * 2, 128 + noise * 2, 128 + noise * 2)
+                }
+                // TILE (8,0): Netherrack
+                8 -> return col(120 + noise * 2, 28 + noise, 28 + noise)
+                // TILE (9,0): Soul Sand
+                9 -> {
+                    val isFace = (px + py) % 4 == 0 && px in 5..27
+                    return if (isFace) col(62 + noise, 42 + noise, 32) else col(88 + noise, 58 + noise, 45)
+                }
+                // TILE (10,0): Glowstone
+                10 -> {
+                    val grid = px % 8 == 0 || py % 8 == 0
+                    return if (grid) col(220 + noise, 155 + noise, 65) else col(255 + noise, 235 + noise, 145)
+                }
+                // TILE (11,0): End Stone
+                11 -> return col(218 + noise, 222 + noise, 168 + noise)
+                // TILE (12,0): Purpur Block
+                12 -> {
+                    val grid = px % 8 == 0 || py % 8 == 0
+                    return if (grid) col(138 + noise, 95 + noise, 138) else col(185 + noise, 132 + noise, 185)
+                }
+                // TILE (13,0): Chorus Flower
+                13 -> return col(155 + noise, 92 + noise, 155 + noise)
+                // TILE (14,0): Sand
+                14 -> {
+                    val wave = (Math.sin(px * 0.45) * 4).toInt()
+                    return col(224 + noise + wave, 204 + noise + wave, 142 + noise)
+                }
+                // TILE (15,0): Sandstone
+                15 -> {
+                    val strata = py % 8 in 0..1
+                    return if (strata) col(198 + noise, 162 + noise, 110) else col(220 + noise, 192 + noise, 135)
                 }
             }
 
-            // TILE (3,2): TRIAL SPAWNER (Dark runic cage with blazing core!)
-            tileX == 3 && tileY == 2 -> {
-                val isCageBorder = px < 2 || px > 13 || py < 2 || py > 13 || px % 4 == 0 || py % 4 == 0
-                val isBlazingCore = px in 6..9 && py in 6..9
-                if (isBlazingCore) {
-                    AndroidColor.rgb(255, 153, 51) // Blazing bright heat orange
-                } else if (isCageBorder) {
-                    AndroidColor.rgb(45 + noise/2, 35, 60 + noise/2) // Dark runic purple tuff cage
-                } else {
-                    AndroidColor.TRANSPARENT // Hollow mesh transparency!
+            1 -> when (tileX) {
+                // TILE (0,1): Iron Ore
+                0 -> {
+                    val isIron = (px + py) % 6 == 0 && px in 3..28 && py in 3..28
+                    if (isIron) return col(222 + noise, 142 + noise, 102)
+                    return col(128 + noise * 2, 128 + noise * 2, 128 + noise * 2)
+                }
+                // TILE (1,1): Diamond Ore
+                1 -> {
+                    val isDia = (px + py) % 5 == 1 && px in 4..27 && py in 4..27
+                    if (isDia) return col(72 + noise, 238 + noise, 248)
+                    return col(128 + noise * 2, 128 + noise * 2, 128 + noise * 2)
+                }
+                // TILE (2,1): Obsidian
+                2 -> return col(24 + noise / 2, 14 + noise / 3, 38 + noise / 2)
+                // TILE (3,1): Bedrock
+                3 -> {
+                    val dense = (px * py) % 3 == 0
+                    return if (dense) col(38 + noise, 38 + noise, 38 + noise) else col(88 + noise, 88 + noise, 88 + noise)
+                }
+                // TILE (4,1): Crafting Table Top
+                4 -> {
+                    val border = px < 3 || px > 28 || py < 3 || py > 28
+                    return if (border) col(110 + noise, 78 + noise, 48) else col(180 + noise, 138 + noise, 82)
+                }
+                // TILE (5,1): Crafting Table Side
+                5 -> return col(138 + noise, 98 + noise, 60)
+                // TILE (6,1): Furnace Front (Combustible bright flame)
+                6 -> {
+                    val isOpening = px in 6..25 && py in 9..22
+                    if (isOpening) {
+                        return if (py > 15) col(255, 130 + noise * 2, 15) else col(245, 228, 38)
+                    }
+                    return col(98 + noise, 98 + noise, 98 + noise)
+                }
+                // TILE (7,1): Furnace Side
+                7 -> return col(112 + noise, 112 + noise, 112 + noise)
+                // TILE (8,1): Netherite Block
+                8 -> return col(54 + noise, 52 + noise, 58 + noise)
+                // TILE (9,1): Crying Obsidian
+                9 -> {
+                    val tears = px % 8 == 2 && py > 7
+                    return if (tears) col(0, 222 + noise, 255) else col(25 + noise / 2, 14 + noise / 3, 42 + noise / 2)
+                }
+                // TILE (10,1): Ancient Debris
+                10 -> return col(108 + noise, 88 + noise, 82)
+                // TILE (11,1): Deepslate
+                11 -> {
+                    val compress = py % 4 == 0
+                    return if (compress) col(52 + noise, 55 + noise, 60 + noise) else col(78 + noise, 78 + noise, 82 + noise)
+                }
+                // TILE (12,1): Sculk Catalyst
+                12 -> {
+                    val pulse = (px * py) % 7 == 1
+                    return if (pulse) col(12 + noise, 222 + noise, 188) else col(15 + noise / 3, 26 + noise / 2, 35 + noise)
+                }
+                // TILE (13,1): Sculk Sensor
+                13 -> return col(12 + noise, 62 + noise, 82 + noise)
+                // TILE (14,1): Amethyst Block
+                14 -> return col(168 + noise, 70 + noise, 235)
+                // TILE (15,1): Prismarine
+                15 -> return col(55 + noise, 105 + noise, 100 + noise)
+            }
+
+            2 -> when (tileX) {
+                // TILE (0,2): Wooden Chest Side
+                0 -> {
+                    val isClasp = px in 14..17 && py in 11..15
+                    if (isClasp) return col(225, 198, 40)
+                    val border = px < 3 || px > 28 || py < 3 || py > 28
+                    return if (border) col(82 + noise, 55 + noise, 28) else col(128 + noise, 88 + noise, 48)
+                }
+                // TILE (1,2): NANO BANANA 2
+                1 -> {
+                    val dx = px - 15.5
+                    val dy = py - 15.5
+                    val isBanana = (dy > -6 && dy < 6 && dx > -6 && dx < 6 && (dx * dx + dy * dy < 49 && dx * dx + dy * dy > 9))
+                    if (isBanana) return col(255, 218, 0)
+                    val isGrid = px % 8 == 0 || py % 8 == 0
+                    return if (isGrid) col(0, 218, 255) else col(14, 20, 32)
+                }
+                // TILE (2,2): CRAFTER
+                2 -> {
+                    val mouth = px in 10..21 && py in 10..15
+                    if (mouth) return col(212, 82, 22)
+                    val conduit = px % 8 == 1 || py % 8 == 1
+                    return if (conduit) col(122, 48, 32) else col(108 + noise, 108 + noise, 108 + noise)
+                }
+                // TILE (3,2): TRIAL SPAWNER
+                3 -> {
+                    val border = px < 3 || px > 28 || py < 3 || py > 28 || px % 8 == 0 || py % 8 == 0
+                    val core = px in 12..19 && py in 12..19
+                    if (core) return col(255, 142, 32)
+                    if (border) return col(68 + noise, 58, 82 + noise)
+                    return AndroidColor.TRANSPARENT
+                }
+                // TILE (4,2): VAULT
+                4 -> {
+                    val keyhole = px in 14..17 && py in 12..18
+                    val frame = px in 8..23 && (py == 8 || py == 23)
+                    if (keyhole) return col(28, 18, 18)
+                    if (frame) return col(222, 185, 88)
+                    return col(98 + noise, 88 + noise, 82 + noise)
+                }
+                // TILE (5,2): HEAVY CORE
+                5 -> {
+                    val rivet = (px % 8 == 0 && py % 8 == 0)
+                    return if (rivet) col(32, 36, 42) else col(70 + noise, 78 + noise, 88 + noise)
+                }
+                // TILE (6,2): COPPER BULB
+                6 -> {
+                    val bulb = px in 11..20 && py in 11..20
+                    if (bulb) return col(255, 215, 115)
+                    return col(208 + noise, 118 + noise, 78 + noise)
+                }
+                // TILE (7,2): COPPER GRATE
+                7 -> {
+                    val lattice = (px + py) % 8 == 0 || (px - py) % 8 == 0
+                    return if (lattice) col(198 + noise, 112 + noise, 78 + noise) else AndroidColor.TRANSPARENT
+                }
+                // TILE (8,2): CHISELED COPPER
+                8 -> {
+                    val dist = Math.max(Math.abs(px - 15.5), Math.abs(py - 15.5)).toInt()
+                    val etch = dist == 6 || dist == 12
+                    return if (etch) col(138 + noise, 68, 48) else col(215 + noise, 122 + noise, 80 + noise)
+                }
+                // TILE (9,2): COPPER BLOCK
+                9 -> return col(208 + noise, 112 + noise, 72 + noise)
+                // TILE (10,2): COPPER ORE
+                10 -> {
+                    val vein = (px + py) % 8 == 0 && px in 4..27 && py in 4..27
+                    if (vein) return col(82 + noise, 178 + noise, 142)
+                    return col(128 + noise * 2, 128 + noise * 2, 128 + noise * 2)
+                }
+                // TILE (11,2): TUFF BRICKS
+                11 -> {
+                    val grid = px % 16 == 0 || py % 16 == 0
+                    return if (grid) col(68 + noise, 70 + noise, 72 + noise) else col(105 + noise, 105 + noise, 105 + noise)
+                }
+                // TILE (12,2): CHISELED TUFF
+                12 -> {
+                    val d = Math.sqrt(((px - 15.5) * (px - 15.5) + (py - 15.5) * (py - 15.5)))
+                    val ring = d > 10.0 && d < 13.0 || d > 3.0 && d < 6.0
+                    return if (ring) col(62 + noise, 65 + noise, 68 + noise) else col(98 + noise, 98 + noise, 98 + noise)
+                }
+                // TILE (13,2): Cherry Log Side
+                13 -> return col(65 + noise, 48 + noise, 48)
+                // TILE (14,2): Cherry Leaves
+                14 -> {
+                    val isHole = (px * py) % 9 == 0
+                    if (isHole) return AndroidColor.TRANSPARENT
+                    return col(255, 178 + noise / 2, 198 + noise)
+                }
+                // TILE (15,2): Redstone Block
+                15 -> {
+                    val core = px % 6 == 1 || py % 6 == 1
+                    return if (core) col(255 + noise, 28 + noise, 58) else col(195 + noise, 12, 22)
                 }
             }
 
-            // TILE (4,2): VAULT (Brown armored containment box with golden lock and keyhole)
-            tileX == 4 && tileY == 2 -> {
-                val isKeyhole = px in 7..8 && py in 6..9
-                val isGoldBorder = px in 4..11 && (py == 4 || py == 11)
-                if (isKeyhole) {
-                    AndroidColor.rgb(30, 20, 20) // Deep dark keyhole slit
-                } else if (isGoldBorder) {
-                    AndroidColor.rgb(218, 181, 83) // Golden frame rim
-                } else {
-                    val base = 90 + noise
-                    val r = (base - 10).coerceIn(0, 255)
-                    val g = (base - 15).coerceIn(0, 255)
-                    AndroidColor.rgb(base, r, g) // Deep rugged clay brown vault alloy
+            3 -> when (tileX) {
+                // TILE (0,3): Sea Lantern
+                0 -> {
+                    val border = px < 3 || px > 28 || py < 3 || py > 28
+                    return if (border) col(128 + noise, 192 + noise, 201) else col(212 + noise, 248 + noise, 248)
                 }
-            }
-
-            // TILE (5,2): HEAVY CORE (Industrial block)
-            tileX == 5 && tileY == 2 -> {
-                val isRivet = (px % 4 == 0 && py % 4 == 0)
-                if (isRivet) {
-                    AndroidColor.rgb(27, 30, 34) // Dark steel rivet heads
-                } else {
-                    val base = 65 + noise
-                    val b = (base + 10).coerceIn(0, 255)
-                    val g = (base + 5).coerceIn(0, 255)
-                    AndroidColor.rgb(base, g, b) // Heavy blue-steel plates
+                // TILE (1,3): Beehive
+                1 -> {
+                    val slot = py % 6 == 0
+                    return if (slot) col(222 + noise, 132 + noise, 38) else col(252 + noise, 172 + noise, 58)
                 }
-            }
-
-            // TILE (6,2): COPPER BULB (Glowing copper orange light)
-            tileX == 6 && tileY == 2 -> {
-                val isBulb = px in 5..10 && py in 5..10
-                if (isBulb) {
-                    AndroidColor.rgb(255, 200, 110) // Super heated brilliant yellow bulb
-                } else {
-                    val baseR = 217 + noise
-                    val baseG = 120 + noise / 2
-                    AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), 82) // Bright trial copper
+                // TILE (2,3): Sponge
+                2 -> {
+                    val pore = (px * py) % 5 == 1
+                    return if (pore) col(168 + noise, 162 + noise, 52) else col(218 + noise, 212 + noise, 82)
                 }
-            }
-
-            // TILE (7,2): COPPER GRATE (Diagonal copper lattices with transparent holes)
-            tileX == 7 && tileY == 2 -> {
-                val isLattice = (px + py) % 4 == 0 || (px - py) % 4 == 0
-                if (isLattice) {
-                    val baseR = 204 + noise
-                    val baseG = 112 + noise / 2
-                    AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), 75)
-                } else {
-                    AndroidColor.TRANSPARENT // See through grate!
+                // TILE (3,3): Magma Block
+                3 -> {
+                    val activeCracks = (px + py) % 7 == 2 || (px * py) % 11 == 3
+                    return if (activeCracks) col(255, 122 + noise * 2, 12) else col(62 + noise, 28 + noise, 22)
                 }
-            }
-
-            // TILE (8,2): CHISELED COPPER (Concentric square patterns)
-            tileX == 8 && tileY == 2 -> {
-                val dist = Math.max(Math.abs(px - 7.5), Math.abs(py - 7.5)).toInt()
-                val isEtch = dist == 3 || dist == 6
-                if (isEtch) {
-                    AndroidColor.rgb(130 + noise, 60, 40) // Dark copper oxidation grooves
-                } else {
-                    val baseR = 230 + noise
-                    val baseG = 125 + noise / 2
-                    AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), 83)
+                // TILE (4,3): Lapis Block
+                4 -> {
+                    val goldGleck = (px + py * 3) % 13 == 1
+                    if (goldGleck) return col(218, 178, 48)
+                    return col(22 + noise, 42 + noise, 138 + noise)
                 }
-            }
-
-            // TILE (9,2): COPPER BLOCK (Solid clean copper bricks)
-            tileX == 9 && tileY == 2 -> {
-                val baseR = 211 + noise
-                val baseG = 106 + noise / 2
-                AndroidColor.rgb(baseR.coerceIn(0, 255), baseG.coerceIn(0, 255), 68)
-            }
-
-            // TILE (10,2): COPPER ORE (Oxidized turquoise-green veins)
-            tileX == 10 && tileY == 2 -> {
-                val isCopperVein = (px + py) % 5 == 0 && px in 2..13 && py in 2..13
-                if (isCopperVein) {
-                    AndroidColor.rgb((84 + noise).coerceIn(0, 255), (178 + noise).coerceIn(0, 255), (141 + noise).coerceIn(0, 255)) // Vibrant oxidized copper turquoise!
-                } else {
-                    val grey = 135 + noise * 2
-                    AndroidColor.rgb(grey.coerceIn(0, 255), grey.coerceIn(0, 255), grey.coerceIn(0, 255))
+                // TILE (5,3): Emerald Block
+                5 -> {
+                    val bevel = px < 3 || px > 28 || py < 3 || py > 28 || px == py
+                    return if (bevel) col(0, 152 + noise, 52) else col(28 + noise, 225 + noise, 102)
                 }
-            }
-
-            // TILE (11,2): TUFF BRICKS (Dark grey structural bricks)
-            tileX == 11 && tileY == 2 -> {
-                val isGroove = px % 8 == 0 || py % 8 == 0
-                if (isGroove) {
-                    AndroidColor.rgb((67 + noise).coerceIn(0, 255), (70 + noise).coerceIn(0, 255), (71 + noise).coerceIn(0, 255))
-                } else {
-                    val grey = 103 + noise
-                    AndroidColor.rgb(grey.coerceIn(0, 255), grey.coerceIn(0, 255), grey.coerceIn(0, 255))
+                // TILE (6,3): Gold Block
+                6 -> return col(255 + noise, 222 + noise, 52)
+                // TILE (7,3): Iron Block
+                7 -> {
+                    val plateBorder = px < 2 || px > 29 || py < 2 || py > 29 || px == 2 || py == 2
+                    return if (plateBorder) col(178 + noise, 178 + noise, 178 + noise) else col(228 + noise, 228 + noise, 228 + noise)
                 }
-            }
-
-            // TILE (12,2): CHISELED TUFF (Ornate concentric circles in volcanic stone)
-            tileX == 12 && tileY == 2 -> {
-                val dx = Math.abs(px - 7.5)
-                val dy = Math.abs(py - 7.5)
-                val dist = Math.sqrt(dx * dx + dy * dy)
-                val isCircle = dist > 4.5 && dist < 6.5 || dist > 1.5 && dist < 3.0
-                if (isCircle) {
-                    AndroidColor.rgb((56 + noise).coerceIn(0, 255), (59 + noise).coerceIn(0, 255), (60 + noise).coerceIn(0, 255))
-                } else {
-                    val grey = 95 + noise
-                    AndroidColor.rgb(grey.coerceIn(0, 255), grey.coerceIn(0, 255), grey.coerceIn(0, 255))
+                // TILE (8,3): Diamond Block
+                8 -> return col(102 + noise, 238 + noise, 248)
+                // TILE (9,3): Mud Block
+                9 -> return col(70 + noise, 58 + noise, 50 + noise)
+                // TILE (10,3): Mangrove Log Side
+                10 -> return col(95 + noise, 48 + noise, 38)
+                // TILE (11,3): Blackstone
+                11 -> return col(40 + noise, 38 + noise, 45 + noise)
+                // TILE (12,3): Honey Block
+                12 -> return col(255, 178 + noise / 2, 18, 180)
+                // TILE (13,3): Honeycomb Block
+                13 -> {
+                    val hex = (px + py) % 6 == 0
+                    return if (hex) col(232 + noise, 142 + noise, 22) else col(255 + noise, 198 + noise, 35)
                 }
-            }
-
-            // Default Solid Voxel noise
-            else -> {
-                val base = 120 + noise
-                AndroidColor.rgb(base.coerceIn(0,255), base.coerceIn(0,255), base.coerceIn(0,255))
+                // TILE (14,3): Froglight
+                14 -> return col(255 + noise, 250 + noise, 212 + noise)
+                // TILE (15,3): Barrel Side
+                15 -> {
+                    val hoop = py == 6 || py == 25
+                    return if (hoop) col(78 + noise, 78 + noise, 78) else col(138 + noise, 98 + noise, 58)
+                }
             }
         }
+
+        // Catch-all fallback grey
+        val fallbackGrey = (120 + noise).coerceIn(0, 255)
+        return AndroidColor.rgb(fallbackGrey, fallbackGrey, fallbackGrey)
     }
 }

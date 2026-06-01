@@ -4,7 +4,7 @@ import androidx.compose.ui.graphics.Color
 import com.squareup.moshi.JsonClass
 
 enum class ToolType {
-    NONE, PICKAXE, AXE, SHOVEL, SWORD
+    NONE, PICKAXE, AXE, SHOVEL, SWORD, HOE
 }
 
 enum class ToolTier(val level: Int, val miningSpeedMultiplier: Float) {
@@ -284,7 +284,7 @@ data class ChestState(
 
 @JsonClass(generateAdapter = true)
 data class PlayerState(
-    var x: Float = 50f, // chunk coordinates
+    var x: Float = 50000f, // chunk coordinates
     var y: Float = 15f,
     var velocityX: Float = 0f,
     var velocityY: Float = 0f,
@@ -304,9 +304,10 @@ data class PlayerState(
 data class WorldSave(
     val name: String,
     val seed: Long,
-    val width: Int = 200,
+    val width: Int = 100000,
     val height: Int = 45,
     val gameMode: String = "Survival", // "Survival", "Creative"
+    val worldType: String = "Standard", // "Standard", "Flat", "Mountains"
     val playerState: PlayerState = PlayerState(),
     val worldBlocks: Map<String, String> = emptyMap(), // Key: "x,y", Value: Block ID
     val creationTime: Long = System.currentTimeMillis(),
@@ -367,16 +368,44 @@ object GameRegistry {
         
         // 1.13 - 1.20 Historic Blocks
         registerBlock(vanillaBlocks, BlockType("prismarine", "Prismarine Block", hardness = 1.3f, requiredToolType = ToolType.PICKAXE, dropItemId = "prismarine", colorHex = "#315D5F", accentColorHex = "#1D3F41"))
+        registerBlock(vanillaBlocks, BlockType("sea_lantern", "Sea Lantern", hardness = 0.3f, dropItemId = "prismarine", colorHex = "#B2EBF2", accentColorHex = "#E0F7FA"))
         registerBlock(vanillaBlocks, BlockType("barrel", "Barrel", hardness = 1.1f, requiredToolType = ToolType.AXE, dropItemId = "barrel", colorHex = "#8E6037", topColorHex = "#6E4521"))
         registerBlock(vanillaBlocks, BlockType("honeycomb_block", "Honeycomb Block", hardness = 0.5f, dropItemId = "honeycomb_block", colorHex = "#E59B12"))
+        registerBlock(vanillaBlocks, BlockType("honey_block", "Honey Block", hardness = 0.1f, isSolid = true, isPassable = true, dropItemId = "honey_block", colorHex = "#FFB300"))
+        registerBlock(vanillaBlocks, BlockType("beehive", "Beehive", hardness = 0.6f, requiredToolType = ToolType.AXE, dropItemId = "beehive", colorHex = "#FFA726", topColorHex = "#FB8C00"))
         registerBlock(vanillaBlocks, BlockType("netherrack", "Netherrack", hardness = 0.4f, requiredToolType = ToolType.PICKAXE, dropItemId = "netherrack", colorHex = "#661414", accentColorHex = "#400606"))
+        registerBlock(vanillaBlocks, BlockType("blackstone", "Blackstone", hardness = 1.5f, requiredToolType = ToolType.PICKAXE, dropItemId = "blackstone", colorHex = "#232026", accentColorHex = "#141217"))
+        registerBlock(vanillaBlocks, BlockType("crying_obsidian", "Crying Obsidian", hardness = 10.0f, requiredToolType = ToolType.PICKAXE, requiredToolTier = 4, dropItemId = "crying_obsidian", colorHex = "#1C0D30", accentColorHex = "#8E24AA"))
+        registerBlock(vanillaBlocks, BlockType("netherite_block", "Netherite Block", hardness = 15.0f, requiredToolType = ToolType.PICKAXE, requiredToolTier = 4, dropItemId = "netherite_block", colorHex = "#312F35", accentColorHex = "#1C1B1F"))
         registerBlock(vanillaBlocks, BlockType("ancient_debris", "Ancient Debris", hardness = 8.5f, requiredToolType = ToolType.PICKAXE, requiredToolTier = 4, dropItemId = "ancient_debris", colorHex = "#4C3834", topColorHex = "#5E4742"))
         registerBlock(vanillaBlocks, BlockType("deepslate", "Deepslate", hardness = 2.0f, requiredToolType = ToolType.PICKAXE, requiredToolTier = 2, dropItemId = "deepslate", colorHex = "#3F4042", accentColorHex = "#232426"))
+        registerBlock(vanillaBlocks, BlockType("sculk", "Sculk Catalyst", hardness = 0.6f, requiredToolType = ToolType.HOE, dropItemId = "sculk", colorHex = "#0C1D24", accentColorHex = "#21EDC4"))
+        registerBlock(vanillaBlocks, BlockType("sculk_sensor", "Sculk Sensor", hardness = 0.6f, requiredToolType = ToolType.HOE, dropItemId = "sculk_sensor", colorHex = "#042D3B", topColorHex = "#0DF7F3"))
         registerBlock(vanillaBlocks, BlockType("amethyst_block", "Block of Amethyst", hardness = 1.5f, requiredToolType = ToolType.PICKAXE, dropItemId = "amethyst_shard", colorHex = "#9C27B0", accentColorHex = "#E040FB"))
+        registerBlock(vanillaBlocks, BlockType("froglight", "Froglight Block", hardness = 0.3f, dropItemId = "froglight", colorHex = "#FFF9C4", accentColorHex = "#FFE082"))
         registerBlock(vanillaBlocks, BlockType("mud", "Mud Block", hardness = 0.3f, requiredToolType = ToolType.SHOVEL, dropItemId = "mud", colorHex = "#42372E"))
         registerBlock(vanillaBlocks, BlockType("mangrove_log", "Mangrove Log", hardness = 0.8f, requiredToolType = ToolType.AXE, dropItemId = "mangrove_log", colorHex = "#52251B", accentColorHex = "#2E110A"))
         registerBlock(vanillaBlocks, BlockType("cherry_log", "Cherry Log", hardness = 0.8f, requiredToolType = ToolType.AXE, dropItemId = "cherry_log", colorHex = "#2E1E1E", topColorHex = "#DCAEAA"))
         registerBlock(vanillaBlocks, BlockType("cherry_leaves", "Cherry Leaves", hardness = 0.1f, isSolid = true, isPassable = true, dropItemId = "cherry_leaves", colorHex = "#FFB7C5", accentColorHex = "#FF8093"))
+        
+        // Classic Update & Nether Blocks
+        registerBlock(vanillaBlocks, BlockType("soul_sand", "Soul Sand", hardness = 0.5f, requiredToolType = ToolType.SHOVEL, dropItemId = "soul_sand", colorHex = "#5C3E2F", accentColorHex = "#32251D"))
+        registerBlock(vanillaBlocks, BlockType("magma_block", "Magma Block", hardness = 0.5f, requiredToolType = ToolType.PICKAXE, dropItemId = "magma_block", colorHex = "#8F3F1F", accentColorHex = "#511D12"))
+        registerBlock(vanillaBlocks, BlockType("sponge", "Sponge", hardness = 0.6f, dropItemId = "sponge", colorHex = "#CDCD4C", accentColorHex = "#9E9E2F"))
+        registerBlock(vanillaBlocks, BlockType("purpur_block", "Purpur Block", hardness = 1.5f, requiredToolType = ToolType.PICKAXE, dropItemId = "purpur_block", colorHex = "#B886B8", accentColorHex = "#8C5C8C"))
+        registerBlock(vanillaBlocks, BlockType("chorus_flower", "Chorus Flower", hardness = 0.8f, requiredToolType = ToolType.AXE, dropItemId = "chorus_flower", colorHex = "#9C5C9C", accentColorHex = "#6E356E"))
+        registerBlock(vanillaBlocks, BlockType("sand", "Sand", hardness = 0.5f, requiredToolType = ToolType.SHOVEL, dropItemId = "sand", colorHex = "#DBD2A0", accentColorHex = "#C6B57E"))
+        registerBlock(vanillaBlocks, BlockType("sandstone", "Sandstone", hardness = 0.8f, requiredToolType = ToolType.PICKAXE, dropItemId = "sandstone", colorHex = "#C6B57E", accentColorHex = "#98845A"))
+        registerBlock(vanillaBlocks, BlockType("end_stone", "End Stone", hardness = 3.0f, requiredToolType = ToolType.PICKAXE, dropItemId = "end_stone", colorHex = "#DCDEB1", accentColorHex = "#A2A481"))
+        
+        // Classic Essential Blocks (1.0)
+        registerBlock(vanillaBlocks, BlockType("glowstone", "Glowstone Block", hardness = 0.3f, dropItemId = "glowstone", colorHex = "#FFEB8A", accentColorHex = "#E6C15C"))
+        registerBlock(vanillaBlocks, BlockType("redstone_block", "Block of Redstone", hardness = 1.0f, requiredToolType = ToolType.PICKAXE, dropItemId = "redstone_block", colorHex = "#D50000", accentColorHex = "#FF1744"))
+        registerBlock(vanillaBlocks, BlockType("lapis_block", "Lapis Lazuli Block", hardness = 1.5f, requiredToolType = ToolType.PICKAXE, dropItemId = "lapis_block", colorHex = "#1A237E", accentColorHex = "#283593"))
+        registerBlock(vanillaBlocks, BlockType("emerald_block", "Block of Emerald", hardness = 1.5f, requiredToolType = ToolType.PICKAXE, dropItemId = "emerald_block", colorHex = "#00C853", accentColorHex = "#69F0AE"))
+        registerBlock(vanillaBlocks, BlockType("gold_block", "Block of Gold", hardness = 1.5f, requiredToolType = ToolType.PICKAXE, requiredToolTier = 2, dropItemId = "gold_block", colorHex = "#FFD700", accentColorHex = "#FFEA00"))
+        registerBlock(vanillaBlocks, BlockType("iron_block", "Block of Iron", hardness = 1.5f, requiredToolType = ToolType.PICKAXE, requiredToolTier = 1, dropItemId = "iron_block", colorHex = "#E2E2E2", accentColorHex = "#C4C4C4"))
+        registerBlock(vanillaBlocks, BlockType("diamond_block", "Block of Diamond", hardness = 2.0f, requiredToolType = ToolType.PICKAXE, requiredToolTier = 2, dropItemId = "diamond_block", colorHex = "#4DEEC7", accentColorHex = "#80F6DC"))
         
         // Ores
         registerBlock(vanillaBlocks, BlockType("coal_ore", "Coal Ore", hardness = 1.4f, requiredToolType = ToolType.PICKAXE, requiredToolTier = 1, dropItemId = "coal", colorHex = "#747474", accentColorHex = "#1D1D1D"))
@@ -536,6 +565,23 @@ object GameRegistry {
     fun registerMod(mod: ModDefinition) {
         if (!mod.isEnabled) return
         
+        if (mod.id.contains("ic2")) {
+            // Register all IC2 high tech item parts!
+            registerItem(items, ItemType("mod_ic2_lead_ingot", "Lead Ingot", colorHex = "#5C6470", description = "Heavy radioactive radiation shields"))
+            registerItem(items, ItemType("mod_ic2_tin_ingot", "Tin Ingot", colorHex = "#D8DADE", description = "Lightweight conductible metal"))
+            registerItem(items, ItemType("mod_ic2_raw_tin", "Raw Tin", colorHex = "#CFD8DC", description = "Smelt into tin ingots"))
+            registerItem(items, ItemType("mod_ic2_bronze_ingot", "Bronze Ingot", colorHex = "#CC8833", description = "Tough alloy of copper and tin"))
+            registerItem(items, ItemType("mod_ic2_copper_plate", "Copper Plate", colorHex = "#D87D56", description = "Pressed copper sheets for mechanics"))
+            registerItem(items, ItemType("mod_ic2_re_battery", "RE-Battery", colorHex = "#556B2F", description = "Stores 10,000 EU of portable electric energy"))
+            registerItem(items, ItemType("mod_ic2_uranium_rod", "Uranium Fuel Rod", colorHex = "#4FFF5D", description = "Generates immense heat and nuclear power inside IC2 reactors"))
+            registerItem(items, ItemType("mod_ic2_rubber", "Industrial Rubber", colorHex = "#2E2E2E", description = "Used for cable insulation coating and machine housings"))
+            
+            // Add custom recipes for these high tech elements!
+            craftingRecipes.add(CraftingRecipe("craft_ic2_bronze", "mod_ic2_bronze_ingot", 4, mapOf("copper_block" to 1, "mod_ic2_tin_ore" to 1), true))
+            craftingRecipes.add(CraftingRecipe("craft_ic2_battery", "mod_ic2_re_battery", 1, mapOf("mod_ic2_tin_ingot" to 4, "redstone_block" to 1), true))
+            craftingRecipes.add(CraftingRecipe("craft_ic2_cable_item", "mod_ic2_copper_cable", 6, mapOf("mod_ic2_copper_plate" to 3, "mod_ic2_rubber" to 6), true))
+        }
+
         // 1. Register customized Blocks
         for (cb in mod.blocks) {
             val customBlock = BlockType(

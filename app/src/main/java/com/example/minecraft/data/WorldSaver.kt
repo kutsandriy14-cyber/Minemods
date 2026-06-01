@@ -95,13 +95,9 @@ object WorldSaver {
         val dir = File(context.filesDir, MODS_DIR)
         if (!dir.exists()) {
             dir.mkdirs()
-            // Create a default example Mod so they start with a beautiful template!
-            val example = createExampleMod()
-            saveMod(context, example)
-            return listOf(example)
         }
 
-        val files = dir.listFiles { _, name -> name.endsWith(".json") || name.endsWith(".mjm") } ?: return emptyList()
+        val files = dir.listFiles { _, name -> name.endsWith(".json") || name.endsWith(".mjm") } ?: emptyArray()
         val mods = mutableListOf<ModDefinition>()
 
         for (f in files) {
@@ -122,10 +118,16 @@ object WorldSaver {
             }
         }
 
-        if (mods.isEmpty()) {
-            val example = createExampleMod()
-            saveMod(context, example)
-            return listOf(example)
+        // Always ensure both default and IC2 mod configurations are created/loaded
+        if (mods.none { it.id == "mod_emerald_plus" }) {
+            val emerald = createExampleMod()
+            saveMod(context, emerald)
+            mods.add(emerald)
+        }
+        if (mods.none { it.id == "mod_ic2" }) {
+            val ic2 = createIC2Mod()
+            saveMod(context, ic2)
+            mods.add(ic2)
         }
 
         return mods
@@ -216,6 +218,115 @@ object WorldSaver {
                     colorHex = "#2EBF6A",
                     efficiency = 15.0f, // extremely fast!
                     craftingIngredients = mapOf("mod_emerald_gem" to 3, "stick" to 2)
+                )
+            ),
+            isEnabled = true
+        )
+    }
+
+    private fun createIC2Mod(): ModDefinition {
+        return ModDefinition(
+            id = "mod_ic2",
+            name = "IndustrialCraft 2",
+            description = "Advanced machinery, generators, automated macerators, nuclear reactors, energy storage blocks, and high-tech alloy tools!",
+            blocks = listOf(
+                com.example.minecraft.model.CustomBlockDef(
+                    id = "mod_ic2_uranium_ore",
+                    name = "Uranium Ore",
+                    colorHex = "#23331F",
+                    accentColorHex = "#66FF00",
+                    hardness = 4.0f,
+                    spawnFrequency = "Rare",
+                    spawnDepthMin = 1,
+                    spawnDepthMax = 12,
+                    dropItemId = "mod_ic2_uranium_rod",
+                    craftingIngredients = emptyMap()
+                ),
+                com.example.minecraft.model.CustomBlockDef(
+                    id = "mod_ic2_tin_ore",
+                    name = "Tin Ore",
+                    colorHex = "#5E6C75",
+                    accentColorHex = "#CFD8DC",
+                    hardness = 1.6f,
+                    spawnFrequency = "Medium",
+                    spawnDepthMin = 5,
+                    spawnDepthMax = 25,
+                    dropItemId = "mod_ic2_tin_ingot",
+                    craftingIngredients = emptyMap()
+                ),
+                com.example.minecraft.model.CustomBlockDef(
+                    id = "mod_ic2_generator",
+                    name = "IC2 Coal Generator",
+                    colorHex = "#37474F",
+                    accentColorHex = "#FF3D00",
+                    hardness = 2.0f,
+                    dropItemId = "mod_ic2_generator",
+                    craftingIngredients = mapOf("iron_block" to 1, "furnace" to 1, "copper_block" to 3)
+                ),
+                com.example.minecraft.model.CustomBlockDef(
+                    id = "mod_ic2_macerator",
+                    name = "IC2 Crusher Macerator",
+                    colorHex = "#2E3D2F",
+                    accentColorHex = "#00FFFF",
+                    hardness = 2.0f,
+                    dropItemId = "mod_ic2_macerator",
+                    craftingIngredients = mapOf("iron_block" to 1, "cobblestone" to 6, "redstone_block" to 1)
+                ),
+                com.example.minecraft.model.CustomBlockDef(
+                    id = "mod_ic2_electric_furnace",
+                    name = "IC2 Electric Furnace",
+                    colorHex = "#31353D",
+                    accentColorHex = "#FFD54F",
+                    hardness = 2.0f,
+                    dropItemId = "mod_ic2_electric_furnace",
+                    craftingIngredients = mapOf("furnace" to 1, "redstone_block" to 2, "iron_block" to 1)
+                ),
+                com.example.minecraft.model.CustomBlockDef(
+                    id = "mod_ic2_batbox",
+                    name = "IC2 BatBox Energy Saver",
+                    colorHex = "#4E3629",
+                    accentColorHex = "#FFFF00",
+                    hardness = 1.5f,
+                    dropItemId = "mod_ic2_batbox",
+                    craftingIngredients = mapOf("oak_planks" to 5, "redstone_block" to 1, "copper_block" to 1)
+                ),
+                com.example.minecraft.model.CustomBlockDef(
+                    id = "mod_ic2_copper_cable",
+                    name = "IC2 Copper Wire Cable",
+                    colorHex = "#D84315",
+                    accentColorHex = "#212121",
+                    hardness = 0.5f,
+                    dropItemId = "mod_ic2_copper_cable",
+                    craftingIngredients = mapOf("wood" to 3, "copper_block" to 1)
+                )
+            ),
+            tools = listOf(
+                com.example.minecraft.model.CustomToolDef(
+                    id = "mod_ic2_bronze_sword",
+                    name = "IC2 Bronze Broadsword",
+                    type = "Sword",
+                    tier = "Iron",
+                    colorHex = "#B58A30",
+                    efficiency = 8.0f,
+                    craftingIngredients = mapOf("copper_block" to 1, "stick" to 1)
+                ),
+                com.example.minecraft.model.CustomToolDef(
+                    id = "mod_ic2_bronze_pickaxe",
+                    name = "IC2 Bronze Heavy Pickaxe",
+                    type = "Pickaxe",
+                    tier = "Iron",
+                    colorHex = "#B58A30",
+                    efficiency = 10.0f,
+                    craftingIngredients = mapOf("copper_block" to 2, "stick" to 2)
+                ),
+                com.example.minecraft.model.CustomToolDef(
+                    id = "mod_ic2_nano_saber",
+                    name = "⚡ Elite Nano Saber ⚡",
+                    type = "Sword",
+                    tier = "Diamond",
+                    colorHex = "#00E5FF",
+                    efficiency = 28.0f,
+                    craftingIngredients = mapOf("diamond_block" to 1, "redstone_block" to 2, "obsidian" to 1)
                 )
             ),
             isEnabled = true

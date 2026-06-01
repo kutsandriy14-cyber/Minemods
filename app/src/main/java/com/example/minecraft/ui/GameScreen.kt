@@ -6,6 +6,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -43,6 +47,19 @@ import kotlin.math.floor
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 
+data class BlockParticle(
+    val id: Long = java.util.UUID.randomUUID().mostSignificantBits,
+    var x: Float,
+    var y: Float,
+    var vx: Float,
+    var vy: Float,
+    val color: Color,
+    var alpha: Float = 1.0f,
+    val size: Float = 6f + Math.random().toFloat() * 8f,
+    var age: Int = 0,
+    val maxAge: Int = 15 + (Math.random() * 12).toInt()
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GameScreen(
@@ -61,6 +78,40 @@ fun GameScreen(
     val openChestCoord by viewModel.openChestCoord.collectAsState()
     val isCraftingNear by viewModel.isCraftingTableNear.collectAsState()
     val miningProgress by viewModel.miningProgress.collectAsState()
+
+    // Dynamic Options from VM settings
+    val particlesEnabled by viewModel.particlesEnabled.collectAsState()
+    val particleDensity by viewModel.particleDensity.collectAsState()
+    val renderDistanceSetting by viewModel.renderDistanceSetting.collectAsState()
+    val isFirstPersonSetting by viewModel.isFirstPersonSetting.collectAsState()
+    val buttonSizeMultiplier by viewModel.buttonSizeMultiplier.collectAsState()
+    val touchSensitivity by viewModel.touchSensitivity.collectAsState()
+    val soundEffectsEnabled by viewModel.soundEffectsEnabled.collectAsState()
+
+    // Active screen and dialog configs
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    val particles = remember { mutableStateListOf<BlockParticle>() }
+
+    // Coroutine-driven 60FPS physics step simulator
+    LaunchedEffect(isPaused) {
+        while (true) {
+            delay(16) // ~60fps ticks
+            if (!isPaused && particles.isNotEmpty()) {
+                val listSnapshot = particles.toList()
+                particles.clear()
+                listSnapshot.forEach { p ->
+                    p.x += p.vx
+                    p.y += p.vy
+                    p.vy += 0.4f // Gravitational constant
+                    p.age++
+                    p.alpha = (1.0f - p.age.toFloat() / p.maxAge).coerceIn(0f, 1f)
+                    if (p.age < p.maxAge) {
+                        particles.add(p)
+                    }
+                }
+            }
+        }
+    }
 
     val player = world.playerState
     val activeHotItem = player.inventory[player.activeHotbarIndex]
@@ -133,41 +184,19 @@ fun GameScreen(
             if (is3DMode) {
                 // RENDER GORGEOUS HARDWARE-ACCELERATED 3D OPENGL VOXEL SANDBOX!
                 Minecraft3DView(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = { offset ->
-                                    val hitVx = ((offset.x + camOffsetX) / tileSizePx).toInt()
-                                    val hitVy = (world.height - ((offset.y + camOffsetY) / tileSizePx)).toInt()
-                                    viewModel.handleBlockInteraction(context, hitVx, hitVy)
-                                }
-                            )
-                        },
+                    modifier = Modifier.fillMaxSize(),
                     world = world,
                     viewModel = viewModel,
                     pitchAngle = pitchAngle,
                     yawAngle = yawAngle,
                     zoomVal = zoomVal,
-                    onBlockTap = { vx, vy ->
-                        viewModel.handleBlockInteraction(context, vx, vy)
-                    }
+                    onBlockTap = { vx, vy -> }
                 )
             } else {
                 Canvas(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(skyColor)
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = { offset ->
-                                    // Translate screen touch coordinate to voxel indices
-                                    val hitVx = ((offset.x + camOffsetX) / tileSizePx).toInt()
-                                    val hitVy = (world.height - ((offset.y + camOffsetY) / tileSizePx)).toInt()
-                                    viewModel.handleBlockInteraction(context, hitVx, hitVy)
-                                }
-                            )
-                        }
                 ) {
                     // Background star overlays during night!
                     if (world.currentSkyTime in 12500f..21500f) {
@@ -319,6 +348,194 @@ fun GameScreen(
                         color = Color(0xFF222831),
                         topLeft = Offset(sx + (steveWidth * 0.57f), sy + (steveHeight * 0.95f)),
                         size = Size(steveWidth * 0.35f, steveHeight * 0.05f)
+                    )
+                }
+            }
+
+            // --- UNIFIED TOUCH GESTURE CONTROLLER (HOLD-TO-BREAK & TAP-TO-PLACE) ---
+            var activeMiningX by remember { mutableStateOf(-1) }
+            var activeMiningY by remember { mutableStateOf(-1) }
+            var miningJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+            var lastTouchX by remember { mutableStateOf(0f) }
+            var lastTouchY by remember { mutableStateOf(0f) }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(world, camOffsetX, camOffsetY, tileSizePx) {
+                        detectTapGestures(
+                            onTap = { offset ->
+                                val hitVx = ((offset.x + camOffsetX) / tileSizePx).toInt()
+                                val hitVy = (world.height - ((offset.y + camOffsetY) / tileSizePx)).toInt()
+                                
+                                val existingBlock = world.worldBlocks["$hitVx,$hitVy"] ?: "air"
+                                if (existingBlock == "air") {
+                                    viewModel.forcePlaceBlock(context, hitVx, hitVy)
+                                } else if (existingBlock == "furnace" || existingBlock == "chest" || existingBlock == "crafter" || existingBlock == "vault" || existingBlock == "trial_spawner") {
+                                    viewModel.handleBlockInteraction(context, hitVx, hitVy)
+                                } else {
+                                    // Tapped on solid block -> Place ADJACENT to the clicked side like Pocket Edition
+                                    val clickRelX = (offset.x + camOffsetX) - (hitVx * tileSizePx)
+                                    val clickRelY = (offset.y + camOffsetY) - ((world.height - 1 - hitVy) * tileSizePx)
+                                    
+                                    var targetX = hitVx
+                                    var targetY = hitVy
+                                    
+                                    val distLeft = clickRelX
+                                    val distRight = tileSizePx - clickRelX
+                                    val distTop = clickRelY
+                                    val distBottom = tileSizePx - clickRelY
+                                    
+                                    val minDist = minOf(distLeft, distRight, distTop, distBottom)
+                                    when (minDist) {
+                                        distLeft -> targetX = hitVx - 1
+                                        distRight -> targetX = hitVx + 1
+                                        distTop -> targetY = hitVy + 1
+                                        distBottom -> targetY = hitVy - 1
+                                    }
+                                    
+                                    val targetBlock = world.worldBlocks["$targetX,$targetY"] ?: "air"
+                                    if (targetBlock == "air") {
+                                        viewModel.forcePlaceBlock(context, targetX, targetY)
+                                    } else {
+                                        // Top fallback
+                                        val topBlock = world.worldBlocks["$hitVx,${hitVy + 1}"] ?: "air"
+                                        if (topBlock == "air") {
+                                            viewModel.forcePlaceBlock(context, hitVx, hitVy + 1)
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                    }
+                    .pointerInput(world, camOffsetX, camOffsetY, tileSizePx) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                val hitVx = ((offset.x + camOffsetX) / tileSizePx).toInt()
+                                val hitVy = (world.height - ((offset.y + camOffsetY) / tileSizePx)).toInt()
+                                val existingBlock = world.worldBlocks["$hitVx,$hitVy"] ?: "air"
+                                
+                                if (existingBlock != "air" && existingBlock != "bedrock") {
+                                    activeMiningX = hitVx
+                                    activeMiningY = hitVy
+                                    lastTouchX = offset.x
+                                    lastTouchY = offset.y
+                                    
+                                    miningJob?.cancel()
+                                    miningJob = coroutineScope.launch {
+                                        val bType = GameRegistry.blocks[existingBlock] ?: return@launch
+                                        val speed = viewModel.getToolMiningSpeed(player.inventory[player.activeHotbarIndex], existingBlock)
+                                        val totalTicks = (bType.hardness * 16f / speed).coerceAtLeast(3f)
+                                        var tick = 0f
+                                        
+                                        while (tick < totalTicks) {
+                                            delay(50) // 50ms ticks
+                                            tick += 1.0f
+                                            viewModel.setMiningProgress(tick / totalTicks)
+                                            
+                                            // Emit mining dust particles
+                                            if (viewModel.particlesEnabled.value) {
+                                                val bCol = Color(android.graphics.Color.parseColor(bType.colorHex))
+                                                repeat((3 * viewModel.particleDensity.value).toInt()) {
+                                                    val px = lastTouchX + (Math.random().toFloat() - 0.5f) * 30f
+                                                    val py = lastTouchY + (Math.random().toFloat() - 0.5f) * 30f
+                                                    val vx = (Math.random().toFloat() - 0.5f) * 5f
+                                                    val vy = -2f - Math.random().toFloat() * 3f
+                                                    particles.add(BlockParticle(x = px, y = py, vx = vx, vy = vy, color = bCol))
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Block broken!
+                                        viewModel.mineBlockAction(context, hitVx, hitVy, existingBlock)
+                                        
+                                        // Exploding burst particles
+                                        if (viewModel.particlesEnabled.value) {
+                                            val bCol = Color(android.graphics.Color.parseColor(bType.colorHex))
+                                            repeat((14 * viewModel.particleDensity.value).toInt()) {
+                                                val vx = (Math.random().toFloat() - 0.5f) * 10f
+                                                val vy = -4f - Math.random().toFloat() * 6f
+                                                particles.add(BlockParticle(x = lastTouchX, y = lastTouchY, vx = vx, vy = vy, color = bCol))
+                                            }
+                                        }
+                                        
+                                        activeMiningX = -1
+                                        activeMiningY = -1
+                                        viewModel.resetMiningProgress()
+                                    }
+                                }
+                            },
+                            onDragEnd = {
+                                miningJob?.cancel()
+                                activeMiningX = -1
+                                activeMiningY = -1
+                                viewModel.resetMiningProgress()
+                            },
+                            onDragCancel = {
+                                miningJob?.cancel()
+                                activeMiningX = -1
+                                activeMiningY = -1
+                                viewModel.resetMiningProgress()
+                            },
+                            onDrag = { change, dragAmount ->
+                                lastTouchX = change.position.x
+                                lastTouchY = change.position.y
+                                
+                                val hitVx = ((lastTouchX + camOffsetX) / tileSizePx).toInt()
+                                val hitVy = (world.height - ((lastTouchY + camOffsetY) / tileSizePx)).toInt()
+                                if (hitVx != activeMiningX || hitVy != activeMiningY) {
+                                    miningJob?.cancel()
+                                    activeMiningX = -1
+                                    activeMiningY = -1
+                                    viewModel.resetMiningProgress()
+                                }
+                                
+                                // Touch swipe-to-look camera rotation controls in 3D Mode
+                                if (is3DMode && activeMiningX == -1) {
+                                    yawAngle = (yawAngle + dragAmount.x * 0.22f * touchSensitivity) % 360f
+                                    pitchAngle = (pitchAngle - dragAmount.y * 0.18f * touchSensitivity).coerceIn(-45f, 15f)
+                                }
+                            }
+                        )
+                    }
+            )
+
+            // --- EXQUISITE HIGH-PERFORMANCE BLOCK SHARD PARTICLES CANVAS CHANNEL ---
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                particles.forEach { p ->
+                    drawCircle(
+                        color = p.color.copy(alpha = p.alpha),
+                        radius = p.size,
+                        center = Offset(p.x, p.y)
+                    )
+                }
+            }
+
+            // --- HUD COLOURED MINING RADIAL PROGRESS BAR EMBEDDED DYNAMICALLY ---
+            if (miningProgress > 0f && lastTouchX > 0f && lastTouchY > 0f) {
+                Box(
+                    modifier = Modifier
+                        .offset(
+                            x = (lastTouchX / LocalContext.current.resources.displayMetrics.density).dp - 24.dp,
+                            y = (lastTouchY / LocalContext.current.resources.displayMetrics.density).dp - 24.dp
+                        )
+                        .size(48.dp)
+                        .background(Color(0x7F000000), shape = CircleShape)
+                        .border(3.dp, MinecraftGreen.copy(alpha = 0.8f), shape = CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        progress = miningProgress,
+                        color = MinecraftTextYellow,
+                        strokeWidth = 4.dp,
+                        modifier = Modifier.fillMaxSize().padding(4.dp)
+                    )
+                    Text(
+                        text = "${(miningProgress * 100).toInt()}%",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
                     )
                 }
             }
@@ -477,6 +694,16 @@ fun GameScreen(
                         },
                         modifier = Modifier.height(34.dp)
                     )
+                    MinecraftButton(
+                        text = "Zoom +",
+                        onClick = { zoomVal = (zoomVal - 1f).coerceIn(3.5f, 16f) },
+                        modifier = Modifier.height(34.dp)
+                    )
+                    MinecraftButton(
+                        text = "Zoom -",
+                        onClick = { zoomVal = (zoomVal + 1f).coerceIn(3.5f, 16f) },
+                        modifier = Modifier.height(34.dp)
+                    )
                 }
 
                 MinecraftButton(
@@ -502,157 +729,161 @@ fun GameScreen(
             }
         }
 
-        // Floating 3D orbital controls overlay on the right center
-        if (is3DMode) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 12.dp)
-                    .background(Color(0xD91E1E1E))
-                    .border(2.dp, Color(0xFF8A8A8A))
-                    .padding(8.dp)
-            ) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "3D CAMERA",
-                        color = Color.Yellow,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        MinecraftButton(
-                            text = "Yaw ↺",
-                            onClick = { yawAngle = (yawAngle - 15f) % 360f },
-                            modifier = Modifier.width(62.dp).height(30.dp)
-                        )
-                        MinecraftButton(
-                            text = "Yaw ↻",
-                            onClick = { yawAngle = (yawAngle + 15f) % 360f },
-                            modifier = Modifier.width(62.dp).height(30.dp)
-                        )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        MinecraftButton(
-                            text = "Pitch ▲",
-                            onClick = { pitchAngle = (pitchAngle + 6f).coerceIn(-45f, 15f) },
-                            modifier = Modifier.width(62.dp).height(30.dp)
-                        )
-                        MinecraftButton(
-                            text = "Pitch ▼",
-                            onClick = { pitchAngle = (pitchAngle - 6f).coerceIn(-45f, 15f) },
-                            modifier = Modifier.width(62.dp).height(30.dp)
-                        )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        MinecraftButton(
-                            text = "Zoom +",
-                            onClick = { zoomVal = (zoomVal - 1f).coerceIn(3.5f, 16f) },
-                            modifier = Modifier.width(62.dp).height(30.dp)
-                        )
-                        MinecraftButton(
-                            text = "Zoom -",
-                            onClick = { zoomVal = (zoomVal + 1f).coerceIn(3.5f, 16f) },
-                            modifier = Modifier.width(62.dp).height(30.dp)
-                        )
-                    }
-                }
-            }
-        }
-
         // ==========================================
-        // 4. ERGONOMIC ON-SCREEN SURVIVAL CONTROLS
+        // 4. ERGONOMIC ON-SCREEN SURVIVAL CONTROLS (TACTILE 4-WAY CROSS D-PAD)
         // ==========================================
-        // Bottom-Left Side: Run Joystick Left & Right
+        // Bottom-Left Side: Beautiful, Responsive 4-Way D-Pad Cross
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(bottom = 16.dp, start = 24.dp)
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Left Arrow Box
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Top Arrow (▲) - MOVE FORWARD (Camera-relative, 100% non-sticky)
                 Box(
                     modifier = Modifier
-                        .size(54.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xBB222222))
-                        .border(1.dp, Color.LightGray, CircleShape)
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDragStart = { viewModel.joystickX = -1f },
-                                onDragEnd = { viewModel.joystickX = 0f },
-                                onDragCancel = { viewModel.joystickX = 0f },
-                                onDrag = { _, _ -> viewModel.joystickX = -1f }
+                        .size((48 * buttonSizeMultiplier).dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xE6222222))
+                        .border(2.dp, Color(0xFF8A8A8A), RoundedCornerShape(8.dp))
+                        .pointerInput(buttonSizeMultiplier, yawAngle) {
+                            detectTapGestures(
+                                onPress = {
+                                    val lookDirX = Math.sin(Math.toRadians(yawAngle.toDouble())).toFloat()
+                                    viewModel.joystickX = if (lookDirX >= 0f) 1f else -1f
+                                    try {
+                                        awaitRelease()
+                                    } finally {
+                                        viewModel.joystickX = 0f
+                                    }
+                                }
                             )
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("<", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text("▲", color = Color.White, fontSize = (18 * buttonSizeMultiplier).sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                 }
 
-                // Right Arrow Box
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left Arrow (◀)
+                    Box(
+                        modifier = Modifier
+                            .size((48 * buttonSizeMultiplier).dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xE6222222))
+                            .border(2.dp, Color(0xFF8A8A8A), RoundedCornerShape(8.dp))
+                            .pointerInput(buttonSizeMultiplier) {
+                                detectTapGestures(
+                                    onPress = {
+                                        viewModel.joystickX = -1f
+                                        try {
+                                            awaitRelease()
+                                        } finally {
+                                            viewModel.joystickX = 0f
+                                        }
+                                    }
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("◀", color = Color.White, fontSize = (18 * buttonSizeMultiplier).sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    }
+
+                    // Touch Center Decorative Space
+                    Box(
+                        modifier = Modifier
+                            .size((48 * buttonSizeMultiplier).dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x33FFFFFF))
+                            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(8.dp))
+                    )
+
+                    // Right Arrow (▶)
+                    Box(
+                        modifier = Modifier
+                            .size((48 * buttonSizeMultiplier).dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xE6222222))
+                            .border(2.dp, Color(0xFF8A8A8A), RoundedCornerShape(8.dp))
+                            .pointerInput(buttonSizeMultiplier) {
+                                detectTapGestures(
+                                    onPress = {
+                                        viewModel.joystickX = 1f
+                                        try {
+                                            awaitRelease()
+                                        } finally {
+                                            viewModel.joystickX = 0f
+                                        }
+                                    }
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("▶", color = Color.White, fontSize = (18 * buttonSizeMultiplier).sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    }
+                }
+
+                // Bottom Arrow (▼) - MOVE BACKWARD (Camera-relative, 100% non-sticky)
                 Box(
                     modifier = Modifier
-                        .size(54.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xBB222222))
-                        .border(1.dp, Color.LightGray, CircleShape)
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDragStart = { viewModel.joystickX = 1f },
-                                onDragEnd = { viewModel.joystickX = 0f },
-                                onDragCancel = { viewModel.joystickX = 0f },
-                                onDrag = { _, _ -> viewModel.joystickX = 1f }
+                        .size((48 * buttonSizeMultiplier).dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xE6222222))
+                        .border(2.dp, Color(0xFF8A8A8A), RoundedCornerShape(8.dp))
+                        .pointerInput(buttonSizeMultiplier, yawAngle) {
+                            detectTapGestures(
+                                onPress = {
+                                    val lookDirX = Math.sin(Math.toRadians(yawAngle.toDouble())).toFloat()
+                                    viewModel.joystickX = if (lookDirX >= 0f) -1f else 1f
+                                    try {
+                                        awaitRelease()
+                                    } finally {
+                                        viewModel.joystickX = 0f
+                                    }
+                                }
                             )
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(">", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text("▼", color = Color.White, fontSize = (18 * buttonSizeMultiplier).sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                 }
             }
         }
 
-        // Bottom-Right Side: Jump & Action toggle Mode
+        // Bottom-Right Side: Jump Control (100% non-sticky, build/mine toggle removed!)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(bottom = 16.dp, end = 24.dp)
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                // Toggle Breaker / Placer Mode button
-                MinecraftButton(
-                    text = if (isPlaceMode) "Build" else "Mine",
-                    onClick = { viewModel.规律ActionToggle() },
-                    modifier = Modifier.width(90.dp).height(44.dp)
-                )
-
-                // Jump trigger action
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xBB222222))
-                        .border(1.dp, Color.LightGray, CircleShape)
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDragStart = { viewModel.isJumpingPressed = true },
-                                onDragEnd = { viewModel.isJumpingPressed = false },
-                                onDragCancel = { viewModel.isJumpingPressed = false },
-                                onDrag = { _, _ -> viewModel.isJumpingPressed = true }
-                            )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("JUMP", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                }
+            // Tactical JUMP action with instantaneous touch response
+            Box(
+                modifier = Modifier
+                    .size((54 * buttonSizeMultiplier).dp)
+                    .clip(CircleShape)
+                    .background(Color(0xBB222222))
+                    .border(2.dp, Color(0xFF8A8A8A), CircleShape)
+                    .pointerInput(buttonSizeMultiplier) {
+                        detectTapGestures(
+                            onPress = {
+                                viewModel.isJumpingPressed = true
+                                try {
+                                    awaitRelease()
+                                } finally {
+                                    viewModel.isJumpingPressed = false
+                                }
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("JUMP", color = Color.White, fontSize = (11 * buttonSizeMultiplier).sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
         }
 
@@ -985,11 +1216,202 @@ fun GameScreen(
                     )
 
                     MinecraftButton(
+                        text = "Options & Settings",
+                        onClick = { showSettingsDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    MinecraftButton(
                         text = "Quit to Title",
                         onClick = {
                             viewModel.closeContainer(context)
                             onQuitToMenu()
                         },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+
+        // ==========================================
+        // 8. MINECRAFT OPTIONS & SETTINGS POPUP MODAL
+        // ==========================================
+        if (showSettingsDialog) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xE6000000)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .width(360.dp)
+                        .background(Color(0xFF2E2E2E))
+                        .border(2.dp, Color(0xFF8A8A8A))
+                        .padding(18.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "OPTIONS & SETTINGS",
+                        color = MinecraftTextYellow,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // 1. Particle System Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Particles Engine", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .background(if (particlesEnabled) Color(0xFF3F6C3F) else Color(0xFF444444))
+                                    .border(1.dp, Color.White)
+                                    .clickable { viewModel.updateParticlesEnabled(true) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("ON", color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .background(if (!particlesEnabled) Color(0xFF8A3A3A) else Color(0xFF444444))
+                                    .border(1.dp, Color.White)
+                                    .clickable { viewModel.updateParticlesEnabled(false) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("OFF", color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    // 2. Particle Density Slider
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Particle Quantity", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Text("${String.format("%.1f", particleDensity)}x", color = MinecraftTextYellow, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        Slider(
+                            value = particleDensity,
+                            onValueChange = { viewModel.updateParticleDensity(it) },
+                            valueRange = 0.5f..2.5f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MinecraftTextYellow,
+                                activeTrackColor = MinecraftGreen
+                            )
+                        )
+                    }
+
+                    HorizontalDivider(color = Color(0xFF555555), thickness = 1.dp)
+
+                    // 3. Render Distance Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Render Distance", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf("Low", "Medium", "High").forEach { dist ->
+                                Box(
+                                    modifier = Modifier
+                                        .background(if (renderDistanceSetting == dist) Color(0xFF3B5B8A) else Color(0xFF444444))
+                                        .border(1.dp, Color.White)
+                                        .clickable { viewModel.updateRenderDistance(dist) }
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                ) {
+                                    Text(dist, color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. Perspective Mode Selector
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Gameplay Camera", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        Box(
+                            modifier = Modifier
+                                .background(if (isFirstPersonSetting) Color(0xFF5C335C) else Color(0xFF335C5C))
+                                .border(1.dp, Color.White)
+                                .clickable { viewModel.updateFirstPerson(!isFirstPersonSetting) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (isFirstPersonSetting) "1st Person [Real]" else "Axonometric 3D",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Color(0xFF555555), thickness = 1.dp)
+
+                    // 5. Button Sizing Slider
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("D-Pad Button Size", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Text("${String.format("%.2f", buttonSizeMultiplier)}x", color = MinecraftTextYellow, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        Slider(
+                            value = buttonSizeMultiplier,
+                            onValueChange = { viewModel.updateButtonMultiplier(it) },
+                            valueRange = 0.7f..1.5f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MinecraftTextYellow,
+                                activeTrackColor = MinecraftGreen
+                            )
+                        )
+                    }
+
+                    // 6. Sound effects toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Mine Sound Effects", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        Box(
+                            modifier = Modifier
+                                .background(if (soundEffectsEnabled) Color(0xFF2D6A4F) else Color(0xFF800F2F))
+                                .border(1.dp, Color.White)
+                                .clickable { viewModel.updateSoundEnabled(!soundEffectsEnabled) }
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (soundEffectsEnabled) "UNMUTED [ON]" else "MUTED [OFF]",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    MinecraftButton(
+                        text = "Save & Apply Settings",
+                        onClick = { showSettingsDialog = false },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
