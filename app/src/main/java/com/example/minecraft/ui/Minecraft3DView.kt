@@ -80,33 +80,19 @@ class Minecraft3DRenderer(
     private var isTextureLoaded = false
     private var dynamicAtlas: Bitmap? = null
 
-    // Vertices coordinates for a single face quad centered at 0,0,0
-    private val faceVertices = floatArrayOf(
-        -0.5f, -0.5f, 0f,
-         0.5f, -0.5f, 0f,
-         0.5f,  0.5f, 0f,
-        -0.5f,  0.5f, 0f
-    )
-
-    private val vertexBuffer: FloatBuffer
-    private val texCoordinateBuffer: FloatBuffer
-
-    init {
-        // Init direct buffers
-        vertexBuffer = ByteBuffer.allocateDirect(faceVertices.size * 4).run {
-            order(ByteOrder.nativeOrder())
-            asFloatBuffer()
-        }.apply {
-            put(faceVertices)
-            position(0)
-        }
-
-        // Texture coords placeholder, updated on the fly for each specific tile
-        texCoordinateBuffer = ByteBuffer.allocateDirect(8 * 4).run {
-            order(ByteOrder.nativeOrder())
-            asFloatBuffer()
-        }
+    private val maxVertices = 600000
+    private val vertexBuffer: FloatBuffer = ByteBuffer.allocateDirect(maxVertices * 3 * 4).run {
+        order(ByteOrder.nativeOrder())
+        asFloatBuffer()
     }
+    private val texCoordinateBuffer: FloatBuffer = ByteBuffer.allocateDirect(maxVertices * 2 * 4).run {
+        order(ByteOrder.nativeOrder())
+        asFloatBuffer()
+    }
+
+    private val vertexArray = FloatArray(maxVertices * 3)
+    private val texCoordArray = FloatArray(maxVertices * 2)
+    private var vertexCount = 0
 
     override fun onSurfaceCreated(gl: GL10, config: EGLConfig) {
         // Configure basic OpenGL settings
@@ -247,7 +233,7 @@ class Minecraft3DRenderer(
         // 3. Render 3D Voxels Grid
         val centerGridX = player.x.toInt()
         val centerGridY = player.y.toInt()
-
+ 
         // Render dynamic chunk slices depending on chosen Render Distance
         val rDist = viewModel.renderDistanceSetting.value
         val renderRadX = when (rDist) {
@@ -261,26 +247,26 @@ class Minecraft3DRenderer(
             else -> 10 // "Medium"
         }
         val terrainDepth = when (rDist) {
-            "Low" -> 1
-            "High" -> 3
-            else -> 2 // "Medium"
+            "Low" -> 4
+            "High" -> 15
+            else -> 10 // "Medium"
         }
-
+ 
         val startX = (centerGridX - renderRadX).coerceAtLeast(0)
         val endX = (centerGridX + renderRadX).coerceAtMost(worldState.width - 1)
         val startY = (centerGridY - renderRadY).coerceAtLeast(0)
         val endY = (centerGridY + renderRadY).coerceAtMost(worldState.height - 1)
-
+ 
         gl.glEnableClientState(GL10.GL_VERTEX_ARRAY)
         gl.glEnableClientState(GL10.GL_TEXTURE_COORD_ARRAY)
-
-        gl.glVertexPointer(3, GL10.GL_FLOAT, 0, vertexBuffer)
-
+ 
+        vertexCount = 0
+ 
         for (bx in startX..endX) {
             for (by in startY..endY) {
                 val bId = worldState.worldBlocks["$bx,$by"] ?: "air"
                 if (bId == "air") continue
-
+ 
                 // True volumetric rendering based on block categorization!
                 val isTerrain = bId == "stone" || bId == "dirt" || bId == "grass" || bId == "bedrock" || 
                                 bId.contains("ore") || bId == "obsidian" || bId == "tuff_bricks" || 
@@ -289,39 +275,39 @@ class Minecraft3DRenderer(
                                 bId == "deepslate" || bId == "netherrack" || bId == "ancient_debris" || 
                                 bId == "amethyst_block" || bId == "prismarine" || bId == "mud" || bId.startsWith("mod_")
                 val isBuilding = bId == "oak_planks" || bId == "cobblestone" || bId == "crafter" || bId == "barrel" || bId == "honeycomb_block"
-
+ 
                 // Fast neighborhood culling flags
                 val aboveId = worldState.worldBlocks["$bx,${by+1}"] ?: "air"
                 val belowId = worldState.worldBlocks["$bx,${by-1}"] ?: "air"
                 val leftId = worldState.worldBlocks["${bx-1},$by"] ?: "air"
                 val rightId = worldState.worldBlocks["${bx+1},$by"] ?: "air"
-
+ 
                 val isAboveSolid = aboveId != "air" && aboveId != "copper_grate" && aboveId != "trial_spawner"
                 val isBelowSolid = belowId != "air" && belowId != "copper_grate" && belowId != "trial_spawner"
                 val isLeftSolid = leftId != "air" && leftId != "copper_grate" && leftId != "trial_spawner"
                 val isRightSolid = rightId != "air" && rightId != "copper_grate" && rightId != "trial_spawner"
-                
+                 
                 if (isTerrain) {
                     for (bz in -terrainDepth..terrainDepth) {
                         // Apply an organic, satisfying slope curvature downwards away from the center ridge at z=0
-                        val valeyCurvature = -0.16f * (bz * bz)
-                        
+                        val valeyCurvature = -0.06f * (bz * bz)
+                         
                         // Sandwich check for depth slices
                         val drawBack = (bz == -terrainDepth)
                         val drawFront = (bz == terrainDepth)
-                        
+                         
                         val aboveType = GameRegistry.blocks[aboveId]
                         val belowType = GameRegistry.blocks[belowId]
                         val leftType = GameRegistry.blocks[leftId]
                         val rightType = GameRegistry.blocks[rightId]
-
+ 
                         val drawTop = !isAboveSolid || (aboveType != null && !aboveType.isSolid)
                         val drawBottom = !isBelowSolid || (belowType != null && !belowType.isSolid)
                         val drawLeft = !isLeftSolid || (leftType != null && !leftType.isSolid)
                         val drawRight = !isRightSolid || (rightType != null && !rightType.isSolid)
-
-                        draw3DBlock(
-                            gl, bx.toFloat(), by.toFloat() + valeyCurvature, bz.toFloat(), bId,
+ 
+                        build3DBlock(
+                            bx.toFloat(), by.toFloat() + valeyCurvature, bz.toFloat(), bId,
                             drawFront = drawFront, drawBack = drawBack,
                             drawLeft = drawLeft, drawRight = drawRight,
                             drawTop = drawTop, drawBottom = drawBottom
@@ -337,9 +323,9 @@ class Minecraft3DRenderer(
                         val drawBottom = !isBelowSolid
                         val drawLeft = !isLeftSolid
                         val drawRight = !isRightSolid
-
-                        draw3DBlock(
-                            gl, bx.toFloat(), by.toFloat(), bz.toFloat(), bId,
+ 
+                        build3DBlock(
+                            bx.toFloat(), by.toFloat(), bz.toFloat(), bId,
                             drawFront = drawFront, drawBack = drawBack,
                             drawLeft = drawLeft, drawRight = drawRight,
                             drawTop = drawTop, drawBottom = drawBottom
@@ -356,9 +342,9 @@ class Minecraft3DRenderer(
                         val drawBottom = !isBelowSolid
                         val drawLeft = !isLeftSolid
                         val drawRight = !isRightSolid
-
-                        draw3DBlock(
-                            gl, bx.toFloat(), by.toFloat() + slope, bz.toFloat(), bId,
+ 
+                        build3DBlock(
+                            bx.toFloat(), by.toFloat() + slope, bz.toFloat(), bId,
                             drawFront = drawFront, drawBack = drawBack,
                             drawLeft = drawLeft, drawRight = drawRight,
                             drawTop = drawTop, drawBottom = drawBottom
@@ -373,9 +359,9 @@ class Minecraft3DRenderer(
                         val drawBottom = !isBelowSolid
                         val drawLeft = !isLeftSolid
                         val drawRight = !isRightSolid
-
-                        draw3DBlock(
-                            gl, bx.toFloat(), by.toFloat(), bz.toFloat(), bId,
+ 
+                        build3DBlock(
+                            bx.toFloat(), by.toFloat(), bz.toFloat(), bId,
                             drawFront = drawFront, drawBack = drawBack,
                             drawLeft = drawLeft, drawRight = drawRight,
                             drawTop = drawTop, drawBottom = drawBottom
@@ -383,8 +369,8 @@ class Minecraft3DRenderer(
                     }
                 } else {
                     // Interactives & decorative blocks (1-slice thickness at bz=0)
-                    draw3DBlock(
-                        gl, bx.toFloat(), by.toFloat(), 0f, bId,
+                    build3DBlock(
+                        bx.toFloat(), by.toFloat(), 0f, bId,
                         drawFront = true, drawBack = true,
                         drawLeft = !isLeftSolid, drawRight = !isRightSolid,
                         drawTop = !isAboveSolid, drawBottom = !isBelowSolid
@@ -392,85 +378,183 @@ class Minecraft3DRenderer(
                 }
             }
         }
-
+ 
+        // Render visible batch quads in precisely one call!
+        if (vertexCount > 0) {
+            vertexBuffer.clear()
+            vertexBuffer.put(vertexArray, 0, vertexCount * 3)
+            vertexBuffer.position(0)
+ 
+            texCoordinateBuffer.clear()
+            texCoordinateBuffer.put(texCoordArray, 0, vertexCount * 2)
+            texCoordinateBuffer.position(0)
+ 
+            gl.glVertexPointer(3, GL10.GL_FLOAT, 0, vertexBuffer)
+            gl.glTexCoordPointer(2, GL10.GL_FLOAT, 0, texCoordinateBuffer)
+ 
+            gl.glDrawArrays(GL10.GL_TRIANGLES, 0, vertexCount)
+        }
+ 
         // 4. Draw Steve or Steve's Hand overlay!
         if (isFirstPerson) {
             drawSteveFirstPersonHand(gl, player.x, player.y)
         } else {
             draw3DSteve(gl, player.x, player.y)
         }
-
+ 
         gl.glDisableClientState(GL10.GL_VERTEX_ARRAY)
         gl.glDisableClientState(GL10.GL_TEXTURE_COORD_ARRAY)
     }
-
-    private fun draw3DBlock(
-        gl: GL10, x: Float, y: Float, z: Float, blockId: String,
+ 
+    private fun build3DBlock(
+        x: Float, y: Float, z: Float, blockId: String,
         drawFront: Boolean = true, drawBack: Boolean = true,
         drawLeft: Boolean = true, drawRight: Boolean = true,
         drawTop: Boolean = true, drawBottom: Boolean = true
     ) {
-        val bType = GameRegistry.blocks[blockId] ?: return
-
-        // Top, Bottom, Left, Right, Front faces individually texturized
-        // FRONT FACE
         if (drawFront) {
-            pushTextureCoords(gl, getBlockTile(blockId, "front"))
-            gl.glPushMatrix()
-            gl.glTranslatef(x, y, z + 0.5f)
-            gl.glDrawArrays(GL10.GL_TRIANGLE_FAN, 0, 4)
-            gl.glPopMatrix()
+            val tile = getBlockTile(blockId, "front")
+            addFrontFace(x, y, z, tile.first, tile.second)
         }
-
-        // BACK FACE
         if (drawBack) {
-            pushTextureCoords(gl, getBlockTile(blockId, "back"))
-            gl.glPushMatrix()
-            gl.glTranslatef(x, y, z - 0.5f)
-            gl.glRotatef(180f, 0f, 1f, 0f)
-            gl.glDrawArrays(GL10.GL_TRIANGLE_FAN, 0, 4)
-            gl.glPopMatrix()
+            val tile = getBlockTile(blockId, "back")
+            addBackFace(x, y, z, tile.first, tile.second)
         }
-
-        // LEFT FACE
         if (drawLeft) {
-            pushTextureCoords(gl, getBlockTile(blockId, "left"))
-            gl.glPushMatrix()
-            gl.glTranslatef(x - 0.5f, y, z)
-            gl.glRotatef(-90f, 0f, 1f, 0f)
-            gl.glDrawArrays(GL10.GL_TRIANGLE_FAN, 0, 4)
-            gl.glPopMatrix()
+            val tile = getBlockTile(blockId, "left")
+            addLeftFace(x, y, z, tile.first, tile.second)
         }
-
-        // RIGHT FACE
         if (drawRight) {
-            pushTextureCoords(gl, getBlockTile(blockId, "right"))
-            gl.glPushMatrix()
-            gl.glTranslatef(x + 0.5f, y, z)
-            gl.glRotatef(90f, 0f, 1f, 0f)
-            gl.glDrawArrays(GL10.GL_TRIANGLE_FAN, 0, 4)
-            gl.glPopMatrix()
+            val tile = getBlockTile(blockId, "right")
+            addRightFace(x, y, z, tile.first, tile.second)
         }
-
-        // TOP FACE
         if (drawTop) {
-            pushTextureCoords(gl, getBlockTile(blockId, "top"))
-            gl.glPushMatrix()
-            gl.glTranslatef(x, y + 0.5f, z)
-            gl.glRotatef(-90f, 1f, 0f, 0f)
-            gl.glDrawArrays(GL10.GL_TRIANGLE_FAN, 0, 4)
-            gl.glPopMatrix()
+            val tile = getBlockTile(blockId, "top")
+            addTopFace(x, y, z, tile.first, tile.second)
         }
-
-        // BOTTOM FACE
         if (drawBottom) {
-            pushTextureCoords(gl, getBlockTile(blockId, "bottom"))
-            gl.glPushMatrix()
-            gl.glTranslatef(x, y - 0.5f, z)
-            gl.glRotatef(90f, 1f, 0f, 0f)
-            gl.glDrawArrays(GL10.GL_TRIANGLE_FAN, 0, 4)
-            gl.glPopMatrix()
+            val tile = getBlockTile(blockId, "bottom")
+            addBottomFace(x, y, z, tile.first, tile.second)
         }
+    }
+ 
+    private fun addVertex(x: Float, y: Float, z: Float, u: Float, v: Float) {
+        if (vertexCount >= maxVertices) return
+        val vIdx = vertexCount * 3
+        vertexArray[vIdx] = x
+        vertexArray[vIdx + 1] = y
+        vertexArray[vIdx + 2] = z
+ 
+        val tIdx = vertexCount * 2
+        texCoordArray[tIdx] = u
+        texCoordArray[tIdx + 1] = v
+ 
+        vertexCount++
+    }
+ 
+    private fun addFace(
+        x0: Float, y0: Float, z0: Float, u0: Float, v0: Float,
+        x1: Float, y1: Float, z1: Float, u1: Float, v1: Float,
+        x2: Float, y2: Float, z2: Float, u2: Float, v2: Float,
+        x3: Float, y3: Float, z3: Float, u3: Float, v3: Float
+    ) {
+        addVertex(x0, y0, z0, u0, v0)
+        addVertex(x1, y1, z1, u1, v1)
+        addVertex(x2, y2, z2, u2, v2)
+ 
+        addVertex(x0, y0, z0, u0, v0)
+        addVertex(x2, y2, z2, u2, v2)
+        addVertex(x3, y3, z3, u3, v3)
+    }
+ 
+    private fun addFrontFace(x: Float, y: Float, z: Float, tileCol: Int, tileRow: Int) {
+        val size = 16f
+        val sMin = tileCol / size
+        val sMax = (tileCol + 1) / size
+        val tMin = tileRow / size
+        val tMax = (tileRow + 1) / size
+ 
+        addFace(
+            x - 0.5f, y - 0.5f, z + 0.5f, sMin, tMax,
+            x + 0.5f, y - 0.5f, z + 0.5f, sMax, tMax,
+            x + 0.5f, y + 0.5f, z + 0.5f, sMax, tMin,
+            x - 0.5f, y + 0.5f, z + 0.5f, sMin, tMin
+        )
+    }
+ 
+    private fun addBackFace(x: Float, y: Float, z: Float, tileCol: Int, tileRow: Int) {
+        val size = 16f
+        val sMin = tileCol / size
+        val sMax = (tileCol + 1) / size
+        val tMin = tileRow / size
+        val tMax = (tileRow + 1) / size
+ 
+        addFace(
+            x + 0.5f, y - 0.5f, z - 0.5f, sMin, tMax,
+            x - 0.5f, y - 0.5f, z - 0.5f, sMax, tMax,
+            x - 0.5f, y + 0.5f, z - 0.5f, sMax, tMin,
+            x + 0.5f, y + 0.5f, z - 0.5f, sMin, tMin
+        )
+    }
+ 
+    private fun addLeftFace(x: Float, y: Float, z: Float, tileCol: Int, tileRow: Int) {
+        val size = 16f
+        val sMin = tileCol / size
+        val sMax = (tileCol + 1) / size
+        val tMin = tileRow / size
+        val tMax = (tileRow + 1) / size
+ 
+        addFace(
+            x - 0.5f, y - 0.5f, z - 0.5f, sMin, tMax,
+            x - 0.5f, y - 0.5f, z + 0.5f, sMax, tMax,
+            x - 0.5f, y + 0.5f, z + 0.5f, sMax, tMin,
+            x - 0.5f, y + 0.5f, z - 0.5f, sMin, tMin
+        )
+    }
+ 
+    private fun addRightFace(x: Float, y: Float, z: Float, tileCol: Int, tileRow: Int) {
+        val size = 16f
+        val sMin = tileCol / size
+        val sMax = (tileCol + 1) / size
+        val tMin = tileRow / size
+        val tMax = (tileRow + 1) / size
+ 
+        addFace(
+            x + 0.5f, y - 0.5f, z + 0.5f, sMin, tMax,
+            x + 0.5f, y - 0.5f, z - 0.5f, sMax, tMax,
+            x + 0.5f, y + 0.5f, z - 0.5f, sMax, tMin,
+            x + 0.5f, y + 0.5f, z + 0.5f, sMin, tMin
+        )
+    }
+ 
+    private fun addTopFace(x: Float, y: Float, z: Float, tileCol: Int, tileRow: Int) {
+        val size = 16f
+        val sMin = tileCol / size
+        val sMax = (tileCol + 1) / size
+        val tMin = tileRow / size
+        val tMax = (tileRow + 1) / size
+ 
+        addFace(
+            x - 0.5f, y + 0.5f, z + 0.5f, sMin, tMax,
+            x + 0.5f, y + 0.5f, z + 0.5f, sMax, tMax,
+            x + 0.5f, y + 0.5f, z - 0.5f, sMax, tMin,
+            x - 0.5f, y + 0.5f, z - 0.5f, sMin, tMin
+        )
+    }
+ 
+    private fun addBottomFace(x: Float, y: Float, z: Float, tileCol: Int, tileRow: Int) {
+        val size = 16f
+        val sMin = tileCol / size
+        val sMax = (tileCol + 1) / size
+        val tMin = tileRow / size
+        val tMax = (tileRow + 1) / size
+ 
+        addFace(
+            x - 0.5f, y - 0.5f, z - 0.5f, sMin, tMax,
+            x + 0.5f, y - 0.5f, z - 0.5f, sMax, tMax,
+            x + 0.5f, y - 0.5f, z + 0.5f, sMax, tMin,
+            x - 0.5f, y - 0.5f, z + 0.5f, sMin, tMin
+        )
     }
 
     private fun draw3DSteve(gl: GL10, px: Float, py: Float) {

@@ -120,6 +120,7 @@ fun GameScreen(
     var is3DMode by remember { mutableStateOf(true) } // State-of-the-art 3D OpenGL enabled by default!
     var pitchAngle by remember { mutableStateOf(-12f) }
     var yawAngle by remember { mutableStateOf(14f) }
+    val currentYaw by androidx.compose.runtime.rememberUpdatedState(yawAngle)
     var zoomVal by remember { mutableStateOf(8.5f) }
 
     // Screen-space scaling factors (40dp tiles)
@@ -492,7 +493,7 @@ fun GameScreen(
                                 
                                 // Touch swipe-to-look camera rotation controls in 3D Mode
                                 if (is3DMode && activeMiningX == -1) {
-                                    yawAngle = (yawAngle + dragAmount.x * 0.22f * touchSensitivity) % 360f
+                                    yawAngle = (yawAngle - dragAmount.x * 0.22f * touchSensitivity) % 360f
                                     pitchAngle = (pitchAngle - dragAmount.y * 0.18f * touchSensitivity).coerceIn(-45f, 15f)
                                 }
                             }
@@ -749,10 +750,10 @@ fun GameScreen(
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color(0xE6222222))
                         .border(2.dp, Color(0xFF8A8A8A), RoundedCornerShape(8.dp))
-                        .pointerInput(buttonSizeMultiplier, yawAngle) {
+                        .pointerInput(buttonSizeMultiplier) {
                             detectTapGestures(
                                 onPress = {
-                                    val lookDirX = Math.sin(Math.toRadians(yawAngle.toDouble())).toFloat()
+                                    val lookDirX = Math.sin(Math.toRadians(currentYaw.toDouble())).toFloat()
                                     viewModel.joystickX = if (lookDirX >= 0f) 1f else -1f
                                     try {
                                         awaitRelease()
@@ -836,10 +837,10 @@ fun GameScreen(
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color(0xE6222222))
                         .border(2.dp, Color(0xFF8A8A8A), RoundedCornerShape(8.dp))
-                        .pointerInput(buttonSizeMultiplier, yawAngle) {
+                        .pointerInput(buttonSizeMultiplier) {
                             detectTapGestures(
                                 onPress = {
-                                    val lookDirX = Math.sin(Math.toRadians(yawAngle.toDouble())).toFloat()
+                                    val lookDirX = Math.sin(Math.toRadians(currentYaw.toDouble())).toFloat()
                                     viewModel.joystickX = if (lookDirX >= 0f) -1f else 1f
                                     try {
                                         awaitRelease()
