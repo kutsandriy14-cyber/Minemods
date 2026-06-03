@@ -78,7 +78,7 @@ class GameViewModel : ViewModel() {
     val particleDensity = MutableStateFlow(1.0f) // 0.5f = Low, 1.0f = Medium, 1.5f = High
     val renderDistanceSetting = MutableStateFlow("Medium") // "Low", "Medium", "High"
     val isFirstPersonSetting = MutableStateFlow(true)
-    val buttonSizeMultiplier = MutableStateFlow(1.00f) // 0.8f = Small, 1.0f = Normal, 1.25f = Large
+    val buttonSizeMultiplier = MutableStateFlow(1.35f) // 0.8f = Small, 1.0f = Normal, 1.35f = Large
     val touchSensitivity = MutableStateFlow(1.0f)
     val soundEffectsEnabled = MutableStateFlow(true)
 

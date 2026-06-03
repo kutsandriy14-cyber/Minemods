@@ -195,7 +195,7 @@ fun GameScreen(
                                 val currentPos = change.position
                                 val dragDistanceX = Math.abs(currentPos.x - startPos.x)
                                 val dragDistanceY = Math.abs(currentPos.y - startPos.y)
-                                if (dragDistanceX > 15f || dragDistanceY > 15f) {
+                                if (dragDistanceX > 45f || dragDistanceY > 45f) {
                                     isDragging = true
                                 }
                                 
@@ -745,9 +745,9 @@ fun GameScreen(
 
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(54.dp)
                             .background(Color(0xFF222222))
-                            .border(width = if (isSelected) 2.dp else 1.dp, color = bBorder)
+                            .border(width = if (isSelected) 3.dp else 1.dp, color = bBorder)
                             .clickable { viewModel.selectHotbarSlot(i) },
                         contentAlignment = Alignment.Center
                     ) {
@@ -756,9 +756,14 @@ fun GameScreen(
                             // Simple visual render overlay stack
                             Box(
                                 modifier = Modifier
-                                    .fillMaxSize(0.6f)
-                                    .background(type?.getColor() ?: Color.Gray)
-                            )
+                                    .fillMaxSize(0.7f)
+                            ) {
+                                ItemIcon(
+                                    color = type?.getColor() ?: Color.Gray,
+                                    modifier = Modifier.fillMaxSize(),
+                                    isTool = type?.isTool ?: false
+                                )
+                            }
                             if (stack.count > 1) {
                                 Text(
                                     text = "${stack.count}",
@@ -862,7 +867,11 @@ fun GameScreen(
                                     ) {
                                         if (stack != null) {
                                             val itemType = GameRegistry.items[stack.itemId]
-                                            Box(modifier = Modifier.fillMaxSize(0.65f).background(itemType?.getColor() ?: Color.Gray))
+                                            Box(modifier = Modifier.fillMaxSize(0.75f)) {
+                                                val col = itemType?.getColor() ?: Color.Gray
+                                                val isTool = itemType?.isTool ?: false
+                                                ItemIcon(color = col, isTool = isTool, modifier = Modifier.fillMaxSize())
+                                            }
                                             Text(
                                                 text = "${stack.count}",
                                                 color = Color.White,
@@ -900,10 +909,15 @@ fun GameScreen(
                                         // Input Display Slot
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text("INPUT", color = Color.Gray, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
-                                            Box(modifier = Modifier.size(32.dp).background(Color.Black).border(1.dp, Color.Gray), contentAlignment = Alignment.Center) {
+                                            Box(modifier = Modifier.size(48.dp).background(Color.Black).border(1.dp, Color.Gray), contentAlignment = Alignment.Center) {
                                                 val stack = furnace.inputStack
                                                 if (stack != null) {
-                                                    Box(modifier = Modifier.size(16.dp).background(GameRegistry.items[stack.itemId]?.getColor() ?: Color.White))
+                                                    val itemDef = GameRegistry.items[stack.itemId]
+                                                    ItemIcon(
+                                                        color = itemDef?.getColor() ?: Color.White,
+                                                        isTool = itemDef?.isTool ?: false,
+                                                        modifier = Modifier.fillMaxSize(0.7f)
+                                                    )
                                                     Text("${stack.count}", color = Color.White, fontSize = 8.sp, modifier = Modifier.align(Alignment.BottomEnd))
                                                 }
                                             }
@@ -912,10 +926,15 @@ fun GameScreen(
                                         // Fuel Display Slot
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text("FUEL", color = Color.Gray, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
-                                            Box(modifier = Modifier.size(32.dp).background(Color.Black).border(1.dp, Color.Gray), contentAlignment = Alignment.Center) {
+                                            Box(modifier = Modifier.size(48.dp).background(Color.Black).border(1.dp, Color.Gray), contentAlignment = Alignment.Center) {
                                                 val stack = furnace.fuelStack
                                                 if (stack != null) {
-                                                    Box(modifier = Modifier.size(16.dp).background(GameRegistry.items[stack.itemId]?.getColor() ?: Color.White))
+                                                    val itemDef = GameRegistry.items[stack.itemId]
+                                                    ItemIcon(
+                                                        color = itemDef?.getColor() ?: Color.White,
+                                                        isTool = itemDef?.isTool ?: false,
+                                                        modifier = Modifier.fillMaxSize(0.7f)
+                                                    )
                                                     Text("${stack.count}", color = Color.White, fontSize = 8.sp, modifier = Modifier.align(Alignment.BottomEnd))
                                                 }
                                             }
@@ -941,7 +960,12 @@ fun GameScreen(
                                             ) {
                                                 val stack = furnace.outputStack
                                                 if (stack != null) {
-                                                    Box(modifier = Modifier.size(20.dp).background(GameRegistry.items[stack.itemId]?.getColor() ?: Color.White))
+                                                    val itemDef = GameRegistry.items[stack.itemId]
+                                                    ItemIcon(
+                                                        color = itemDef?.getColor() ?: Color.White,
+                                                        isTool = itemDef?.isTool ?: false,
+                                                        modifier = Modifier.fillMaxSize(0.7f)
+                                                    )
                                                     Text("${stack.count}", color = Color.White, fontSize = 9.sp, modifier = Modifier.align(Alignment.BottomEnd))
                                                 }
                                             }
@@ -970,7 +994,12 @@ fun GameScreen(
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 if (stack != null) {
-                                                    Box(modifier = Modifier.fillMaxSize(0.6f).background(GameRegistry.items[stack.itemId]?.getColor() ?: Color.White))
+                                                    val itemDef = GameRegistry.items[stack.itemId]
+                                                    ItemIcon(
+                                                        color = itemDef?.getColor() ?: Color.White,
+                                                        isTool = itemDef?.isTool ?: false,
+                                                        modifier = Modifier.fillMaxSize(0.7f)
+                                                    )
                                                     Text("${stack.count}", color = Color.White, fontSize = 8.sp, modifier = Modifier.align(Alignment.BottomEnd))
                                                 }
                                             }
@@ -1007,7 +1036,12 @@ fun GameScreen(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Box(modifier = Modifier.size(14.dp).background(itemType.getColor()))
+                                            val itemType = allRegistryItems[index]
+                                            ItemIcon(
+                                                color = itemType.getColor(),
+                                                isTool = itemType.isTool,
+                                                modifier = Modifier.size(24.dp)
+                                            )
                                             Text(
                                                 text = itemType.name,
                                                 color = Color.White,
@@ -1045,7 +1079,8 @@ fun GameScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                Box(modifier = Modifier.size(20.dp).background(targetType?.getColor() ?: Color.Gray))
+                                                val color = targetType?.getColor() ?: Color.Gray
+                                                ItemIcon(color = color, isTool = targetType?.isTool ?: false, modifier = Modifier.size(24.dp))
                                                 Text(targetType?.name ?: "", color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                                             }
                                             Text("Craft x${recipe.resultCount}", color = MinecraftTextYellow, fontSize = 9.sp, fontFamily = FontFamily.Monospace)

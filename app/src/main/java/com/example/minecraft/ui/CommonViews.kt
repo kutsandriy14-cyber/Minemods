@@ -94,6 +94,95 @@ fun MinecraftButton(
  * perfectly echoing the Minecraft Title Screen background.
  */
 @Composable
+fun ItemIcon(color: Color, modifier: Modifier = Modifier, isTool: Boolean = false) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        if (isTool) {
+            // Draw a stick (handle)
+            drawLine(
+                color = Color(0xFF5E3A1A),
+                start = Offset(w * 0.2f, h * 0.8f),
+                end = Offset(w * 0.6f, h * 0.4f),
+                strokeWidth = w * 0.15f
+            )
+            // Draw tool head
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(w * 0.45f, h * 0.1f),
+                size = Size(w * 0.45f, h * 0.4f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f, 2f)
+            )
+            // Highlight
+            drawRoundRect(
+                color = Color.White.copy(alpha = 0.3f),
+                topLeft = Offset(w * 0.5f, h * 0.15f),
+                size = Size(w * 0.35f, h * 0.1f)
+            )
+        } else {
+            // Draw as a 3D isometric block
+            // Top face
+            val topColor = Color(
+                color.red.coerceIn(0f, 1f) * 1.2f,
+                color.green.coerceIn(0f, 1f) * 1.2f,
+                color.blue.coerceIn(0f, 1f) * 1.2f
+            ).coerceInColor()
+            // Right face
+            val rightColor = Color(
+                color.red * 0.8f,
+                color.green * 0.8f,
+                color.blue * 0.8f
+            ).coerceInColor()
+            // Left face (base color)
+            
+            // Draw Left Face
+            val leftPath = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.1f, h * 0.35f)
+                lineTo(w * 0.5f, h * 0.55f)
+                lineTo(w * 0.5f, h * 0.95f)
+                lineTo(w * 0.1f, h * 0.75f)
+                close()
+            }
+            drawPath(path = leftPath, color = color)
+            
+            // Draw Right Face
+            val rightPath = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.5f, h * 0.55f)
+                lineTo(w * 0.9f, h * 0.35f)
+                lineTo(w * 0.9f, h * 0.75f)
+                lineTo(w * 0.5f, h * 0.95f)
+                close()
+            }
+            drawPath(path = rightPath, color = rightColor)
+            
+            // Draw Top Face
+            val topPath = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.5f, h * 0.15f)
+                lineTo(w * 0.9f, h * 0.35f)
+                lineTo(w * 0.5f, h * 0.55f)
+                lineTo(w * 0.1f, h * 0.35f)
+                close()
+            }
+            drawPath(path = topPath, color = topColor)
+            
+            // Inner borders for pixel art feel
+            drawPath(path = topPath, color = Color.Black.copy(alpha=0.3f), style = Stroke(width = w*0.05f))
+            drawPath(path = leftPath, color = Color.Black.copy(alpha=0.3f), style = Stroke(width = w*0.05f))
+            drawPath(path = rightPath, color = Color.Black.copy(alpha=0.3f), style = Stroke(width = w*0.05f))
+        }
+    }
+}
+
+fun Color.coerceInColor(): Color {
+    return Color(
+        red = this.red.coerceIn(0f, 1f),
+        green = this.green.coerceIn(0f, 1f),
+        blue = this.blue.coerceIn(0f, 1f),
+        alpha = this.alpha.coerceIn(0f, 1f)
+    )
+}
+
+@Composable
 fun TiledDirtBackground(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.fillMaxSize()) {
         val width = size.width
