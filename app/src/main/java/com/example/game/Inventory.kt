@@ -1,15 +1,23 @@
 package com.example.game
 
-class Inventory(val size: Int = 36, val hotbarSize: Int = 9) {
+class Inventory(val size: Int = 36, val hotbarSize: Int = 12) {
     val items = ByteArray(size)
     var selectedHotbarSlot = 0
 
     init {
         // Initialize with default blocks
-        items[0] = BlockRegistry.DIRT
-        items[1] = BlockRegistry.STONE
-        items[2] = BlockRegistry.GRASS
-        items[3] = BlockRegistry.SAND
+        items[0] = BlockRegistry.WOODEN_PICKAXE
+        items[1] = BlockRegistry.GRASS
+        items[2] = BlockRegistry.STONE
+        items[3] = BlockRegistry.WOOD
+        items[4] = BlockRegistry.PLANKS
+        items[5] = BlockRegistry.LEAVES
+        items[6] = BlockRegistry.GLASS
+        items[7] = BlockRegistry.COBBLESTONE
+        items[8] = BlockRegistry.WATER
+        items[9] = BlockRegistry.LAVA
+        items[10] = BlockRegistry.DIRT
+        items[11] = BlockRegistry.SAND
     }
 
     fun getSelectedBlock(): Byte {

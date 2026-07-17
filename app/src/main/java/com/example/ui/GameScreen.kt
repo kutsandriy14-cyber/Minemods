@@ -34,6 +34,9 @@ import android.content.Context
 import com.example.world.WorldSaveManager
 import java.io.File
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.detectTapGestures
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -85,6 +88,7 @@ fun GameScreen(
     var moveUp by remember { mutableStateOf(false) }
     var moveDown by remember { mutableStateOf(false) }
     var jump by remember { mutableStateOf(false) }
+    var isBreaking by remember { mutableStateOf(false) }
     
     var showAdminPanel by remember { mutableStateOf(false) }
     
@@ -171,6 +175,7 @@ fun GameScreen(
                 if(moveForward) 1f else if(moveBackward) -1f else 0f
             )
             player.update(dt, dirs, jump)
+            player.updateBreaking(dt, isBreaking)
             
             // Update HUD values
             posX = player.camera.position.x
@@ -266,26 +271,44 @@ fun GameScreen(
         
         // 1. Classic Crosshair in the exact center of screen
         Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .size(16.dp)
+            modifier = Modifier.align(Alignment.Center)
         ) {
-            // Horizontal bar
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .background(Color.White.copy(alpha = 0.8f))
-            )
-            // Vertical bar
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .fillMaxHeight()
-                    .width(2.dp)
-                    .background(Color.White.copy(alpha = 0.8f))
-            )
+                    .size(16.dp)
+            ) {
+                // Horizontal bar
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(Color.White.copy(alpha = 0.8f))
+                )
+                // Vertical bar
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxHeight()
+                        .width(2.dp)
+                        .background(Color.White.copy(alpha = 0.8f))
+                )
+            }
+            
+            // Break Progress
+            if (player.breakProgress > 0f) {
+                LinearProgressIndicator(
+                    progress = { player.breakProgress },
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .offset(y = 24.dp)
+                        .width(48.dp)
+                        .height(4.dp),
+                    color = Color.White,
+                    trackColor = Color.Black.copy(alpha = 0.5f)
+                )
+            }
         }
         
         // 2. HUD - Left-aligned debug details & Right-aligned menus
@@ -375,6 +398,15 @@ fun GameScreen(
                 BlockRegistry.DIRT -> "Dirt"
                 BlockRegistry.STONE -> "Stone"
                 BlockRegistry.SAND -> "Sand"
+                BlockRegistry.WOOD -> "Wood"
+                BlockRegistry.PLANKS -> "Wooden Planks"
+                BlockRegistry.LEAVES -> "Leaves"
+                BlockRegistry.COBBLESTONE -> "Cobblestone"
+                BlockRegistry.WATER -> "Water"
+                BlockRegistry.LAVA -> "Lava"
+                BlockRegistry.GLASS -> "Glass"
+                BlockRegistry.WOODEN_PICKAXE -> "Wooden Pickaxe"
+                BlockRegistry.STONE_PICKAXE -> "Stone Pickaxe"
                 else -> "None"
             }
             Card(
@@ -391,17 +423,20 @@ fun GameScreen(
                 )
             }
             
-            // 9-slot Hotbar row
+            // Hotbar row
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.4f)),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier
+                    .fillMaxWidth(0.55f)
                     .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
                     .padding(4.dp)
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.padding(4.dp)
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .horizontalScroll(rememberScrollState())
                 ) {
                     for (slot in 0 until player.inventory.hotbarSize) {
                         val bId = player.inventory.getBlock(slot)
@@ -440,6 +475,33 @@ fun GameScreen(
                                 }
                                 BlockRegistry.SAND -> {
                                     Box(modifier = Modifier.fillMaxSize().background(Color(0xFFDBD19F)))
+                                }
+                                BlockRegistry.WOOD -> {
+                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF5C4033)))
+                                }
+                                BlockRegistry.PLANKS -> {
+                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFB5885C)))
+                                }
+                                BlockRegistry.LEAVES -> {
+                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF228B22)))
+                                }
+                                BlockRegistry.COBBLESTONE -> {
+                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF555555)))
+                                }
+                                BlockRegistry.WATER -> {
+                                    Box(modifier = Modifier.fillMaxSize().background(Color(0x803366FF)))
+                                }
+                                BlockRegistry.LAVA -> {
+                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFFF5500)))
+                                }
+                                BlockRegistry.GLASS -> {
+                                    Box(modifier = Modifier.fillMaxSize().background(Color(0x60EEEEFF)))
+                                }
+                                BlockRegistry.WOODEN_PICKAXE -> {
+                                    Text("⛏️", fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
+                                }
+                                BlockRegistry.STONE_PICKAXE -> {
+                                    Text("⛏", color = Color.Gray, fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
                                 }
                             }
                         }
@@ -557,10 +619,12 @@ fun GameScreen(
             // Break and Place side by side actions
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { player.raycastBlock(true) },
+                    onClick = {},
                     colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f)),
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(48.dp)
+                    modifier = Modifier
+                        .height(48.dp)
+                        .pointerInputHoverLike { down -> isBreaking = down }
                 ) {
                     Text("BREAK", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
@@ -594,7 +658,7 @@ fun GameScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "⚙️ GAME SETTINGS & CONTROL",
+                            text = "⚙️ SETTINGS",
                             color = Color(0xFFFFB300),
                             fontWeight = FontWeight.ExtraBold,
                             fontFamily = FontFamily.Monospace,
@@ -628,7 +692,7 @@ fun GameScreen(
                                 contentPadding = PaddingValues(0.dp)
                             ) {
                                 Text(
-                                    "⚙️ GENERAL SETTINGS",
+                                    "⚙️ SETTINGS",
                                     color = if (activeSettingsTab == 0) Color.Black else Color.White,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp,
@@ -646,7 +710,7 @@ fun GameScreen(
                                 contentPadding = PaddingValues(0.dp)
                             ) {
                                 Text(
-                                    "👑 OPERATOR (OP) TOOLS",
+                                    "👑 CHEATS",
                                     color = if (activeSettingsTab == 1) Color.Black else Color.White,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp,
@@ -657,7 +721,7 @@ fun GameScreen(
 
                         // Content Based on Active Tab
                         if (activeSettingsTab == 0) {
-                            // --- GENERAL SETTINGS TAB ---
+                            // --- SETTINGS TAB ---
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -930,16 +994,29 @@ fun GameScreen(
                                             )
                                         }
                                         
-                                        // Noclip switch
+                                        // Keep Inventory switch
                                         Row(
                                             modifier = Modifier.fillMaxWidth().height(28.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("Noclip (Сквозь блоки)", color = Color.White, fontSize = 11.sp)
+                                            Text("Keep Inventory (Сохр. инвентаря)", color = Color.White, fontSize = 11.sp)
                                             Switch(
-                                                checked = player.noclip,
-                                                onCheckedChange = { player.noclip = it }
+                                                checked = true, // Default true for this engine currently
+                                                onCheckedChange = { }
+                                            )
+                                        }
+                                        
+                                        // Time of day toggle
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().height(28.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Set Night Time", color = Color.White, fontSize = 11.sp)
+                                            Switch(
+                                                checked = world.isNight,
+                                                onCheckedChange = { world.isNight = it }
                                             )
                                         }
                                         
@@ -1102,25 +1179,12 @@ fun GameScreen(
     }
 }
 
-fun Modifier.pointerInputHoverLike(onAction: (Boolean) -> Unit): Modifier = this.pointerInput(onAction) {
+fun Modifier.pointerInputHoverLike(onAction: (Boolean) -> Unit): Modifier = this.pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
             val event = awaitPointerEvent()
-            val initialDown = event.changes.firstOrNull { it.changedToDown() }
-            if (initialDown != null) {
-                val pointerId = initialDown.id
-                onAction(true)
-                
-                var isDown = true
-                while (isDown) {
-                    val nextEvent = awaitPointerEvent()
-                    val change = nextEvent.changes.firstOrNull { it.id == pointerId }
-                    if (change == null || !change.pressed) {
-                        isDown = false
-                        onAction(false)
-                    }
-                }
-            }
+            val hasDown = event.changes.any { it.pressed }
+            onAction(hasDown)
         }
     }
 }

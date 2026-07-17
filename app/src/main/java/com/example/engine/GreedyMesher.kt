@@ -47,7 +47,7 @@ object GreedyMesher {
                                            q[2] + if(d==2) dirOffset else 0)
                         }
                         
-                        if (type != BlockRegistry.AIR && neighborType == BlockRegistry.AIR) {
+                        if (type != BlockRegistry.AIR && (neighborType == BlockRegistry.AIR || (BlockRegistry.isTransparent(neighborType) && type != neighborType))) {
                             mask[n] = type.toInt()
                         } else {
                             mask[n] = 0

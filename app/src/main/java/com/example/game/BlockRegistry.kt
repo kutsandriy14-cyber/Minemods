@@ -6,17 +6,28 @@ object BlockRegistry {
     const val GRASS: Byte = 2
     const val STONE: Byte = 3
     const val SAND: Byte = 4
+    const val WATER: Byte = 5
+    const val LAVA: Byte = 6
+    const val WOOD: Byte = 7
+    const val LEAVES: Byte = 8
+    const val PLANKS: Byte = 9
+    const val GLASS: Byte = 10
+    const val COBBLESTONE: Byte = 11
     
-    // UV mappings (x, y) assuming 16x16 pixel blocks in a 256x256 atlas (16x16 tiles)
-    // Each tile is 1f / 16f size
-    // grass top: 0, 0
-    // dirt: 1, 0
-    // grass side: 2, 0
-    // stone: 3, 0
-    // sand: 4, 0
+    // Tools as placeholder blocks in inventory (won't be placed in world as blocks)
+    const val WOODEN_PICKAXE: Byte = 100
+    const val STONE_PICKAXE: Byte = 101
+    
+    fun isItem(type: Byte): Boolean {
+        return type == WOODEN_PICKAXE || type == STONE_PICKAXE
+    }
     
     fun isSolid(type: Byte): Boolean {
-        return type != AIR
+        return type != AIR && type != WATER && type != LAVA && !isItem(type)
+    }
+
+    fun isTransparent(type: Byte): Boolean {
+        return type == AIR || type == WATER || type == GLASS || type == LEAVES
     }
 
     fun getTextureUV(type: Byte, face: Int): Pair<Int, Int> {
@@ -31,6 +42,18 @@ object BlockRegistry {
             }
             STONE -> 3 to 0
             SAND -> 4 to 0
+            WATER -> 13 to 12 // Using generic water-like coords (assuming terrain.png)
+            LAVA -> 13 to 14
+            WOOD -> {
+                when (face) {
+                    0, 1 -> 5 to 1 // top/bottom
+                    else -> 4 to 1 // sides
+                }
+            }
+            LEAVES -> 4 to 3
+            PLANKS -> 4 to 0 // using sand texture temporarily
+            GLASS -> 1 to 3
+            COBBLESTONE -> 0 to 1
             else -> 0 to 0
         }
     }

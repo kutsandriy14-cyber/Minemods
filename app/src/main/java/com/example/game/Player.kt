@@ -238,9 +238,79 @@ class Player(val world: World) {
         }
     }
 
+    var breakingBx = -1
+    var breakingBy = -1
+    var breakingBz = -1
+    var breakProgress = 0f
+
+    fun updateBreaking(dt: Float, isBreaking: Boolean) {
+        if (!isBreaking || !canBreak) {
+            breakProgress = 0f
+            breakingBy = -1
+            return
+        }
+
+        var rx = camera.position.x
+        var ry = camera.position.y
+        var rz = camera.position.z
+        
+        val dx = camera.front.x
+        val dy = camera.front.y
+        val dz = camera.front.z
+        
+        var foundBx = -1
+        var foundBy = -1
+        var foundBz = -1
+        
+        for (i in 0..100) {
+            rx += dx * 0.05f
+            ry += dy * 0.05f
+            rz += dz * 0.05f
+            
+            val bx = Math.floor(rx.toDouble()).toInt()
+            val by = Math.floor(ry.toDouble()).toInt()
+            val bz = Math.floor(rz.toDouble()).toInt()
+            
+            val block = world.getBlock(bx, by, bz)
+            if (BlockRegistry.isSolid(block)) {
+                foundBx = bx
+                foundBy = by
+                foundBz = bz
+                break
+            }
+        }
+        
+        if (foundBy != -1) {
+            if (foundBx != breakingBx || foundBy != breakingBy || foundBz != breakingBz) {
+                breakingBx = foundBx
+                breakingBy = foundBy
+                breakingBz = foundBz
+                breakProgress = 0f
+            }
+            
+            // Depends on tool and block type, but simple 1s break time for now
+            val equippedTool = inventory.getSelectedBlock()
+            var speedMultiplier = 1.0f 
+            if (equippedTool == BlockRegistry.WOODEN_PICKAXE) speedMultiplier = 2.0f
+            if (equippedTool == BlockRegistry.STONE_PICKAXE) speedMultiplier = 4.0f
+            
+            breakProgress += dt * speedMultiplier
+            
+            if (breakProgress >= 1.0f) {
+                world.setBlock(breakingBx, breakingBy, breakingBz, BlockRegistry.AIR)
+                NetworkManager.sendBlockChange(breakingBx, breakingBy, breakingBz, BlockRegistry.AIR)
+                breakProgress = 0f
+                breakingBy = -1
+            }
+        } else {
+            breakProgress = 0f
+            breakingBy = -1
+        }
+    }
+
     fun raycastBlock(breakBlock: Boolean) {
-        if (breakBlock && !canBreak) return
-        if (!breakBlock && !canBuild) return
+        if (breakBlock) return // Breaking is handled by updateBreaking now
+        if (!canBuild) return
 
         // Simple DDA raycast up to 5 blocks
         var rx = camera.position.x
@@ -266,11 +336,7 @@ class Player(val world: World) {
             
             val block = world.getBlock(bx, by, bz)
             if (BlockRegistry.isSolid(block)) {
-                if (breakBlock) {
-                    world.setBlock(bx, by, bz, BlockRegistry.AIR)
-                    NetworkManager.sendBlockChange(bx, by, bz, BlockRegistry.AIR)
-                } else if (lastBy != -1) {
-                    // Ensure the block to be placed doesn't overlap the player's own AABB!
+                if (lastBy != -1) {
                     val blockBox = AABB(
                         lastBx.toFloat(), lastBy.toFloat(), lastBz.toFloat(),
                         lastBx.toFloat() + 1f, lastBy.toFloat() + 1f, lastBz.toFloat() + 1f
@@ -278,8 +344,10 @@ class Player(val world: World) {
                     val playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
                     if (noclip || !playerBox.intersects(blockBox)) {
                         val blockToPlace = inventory.getSelectedBlock()
-                        world.setBlock(lastBx, lastBy, lastBz, blockToPlace)
-                        NetworkManager.sendBlockChange(lastBx, lastBy, lastBz, blockToPlace)
+                        if (!BlockRegistry.isItem(blockToPlace)) {
+                            world.setBlock(lastBx, lastBy, lastBz, blockToPlace)
+                            NetworkManager.sendBlockChange(lastBx, lastBy, lastBz, blockToPlace)
+                        }
                     }
                 }
                 return

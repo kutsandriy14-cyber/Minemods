@@ -20,6 +20,8 @@ class VoxelRenderer(private val context: Context, private val world: World, val 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES30.glClearColor(0.5f, 0.8f, 1.0f, 1.0f) // Sky color
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
         // Disable GLES face culling to avoid missing faces due to winding order in greedy mesher
         GLES30.glDisable(GLES30.GL_CULL_FACE)
         
