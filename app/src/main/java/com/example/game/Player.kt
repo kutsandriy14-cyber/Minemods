@@ -3,6 +3,7 @@ package com.example.game
 import com.example.engine.Camera
 import com.example.world.World
 import com.example.engine.Vector3f
+import com.example.engine.NetworkManager
 
 class Player(val world: World) {
     val camera = Camera()
@@ -168,9 +169,18 @@ class Player(val world: World) {
             if (BlockRegistry.isSolid(block)) {
                 if (breakBlock) {
                     world.setBlock(bx, by, bz, BlockRegistry.AIR)
+                    NetworkManager.sendBlockChange(bx, by, bz, BlockRegistry.AIR)
                 } else if (lastBy != -1) {
-                    // Place block at previous empty position
-                    world.setBlock(lastBx, lastBy, lastBz, selectedBlockType)
+                    // Ensure the block to be placed doesn't overlap the player's own AABB!
+                    val blockBox = AABB(
+                        lastBx.toFloat(), lastBy.toFloat(), lastBz.toFloat(),
+                        lastBx.toFloat() + 1f, lastBy.toFloat() + 1f, lastBz.toFloat() + 1f
+                    )
+                    val playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
+                    if (!playerBox.intersects(blockBox)) {
+                        world.setBlock(lastBx, lastBy, lastBz, selectedBlockType)
+                        NetworkManager.sendBlockChange(lastBx, lastBy, lastBz, selectedBlockType)
+                    }
                 }
                 return
             }

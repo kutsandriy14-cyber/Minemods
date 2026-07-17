@@ -2,7 +2,7 @@ package com.example.world
 
 import kotlin.math.floor
 
-object SimplexNoise {
+class SimplexNoise(val seed: Long) {
     private val grad3 = arrayOf(
         intArrayOf(1,1,0), intArrayOf(-1,1,0), intArrayOf(1,-1,0), intArrayOf(-1,-1,0),
         intArrayOf(1,0,1), intArrayOf(-1,0,1), intArrayOf(1,0,-1), intArrayOf(-1,0,-1),
@@ -14,36 +14,18 @@ object SimplexNoise {
     private val permMod12 = IntArray(512)
 
     init {
-        // Initialize with default permutation
-        val source = intArrayOf(
-            151,160,137,91,90,15,
-            131,13,201,95,96,53,194,233, 7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,
-            190, 6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,
-            88,237,149,56,87,174,20,125,136,171,168, 68,175,74,165,71,134,139,48,27,166,
-            77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,
-            102,143,54, 65,25,63,161, 1,216,80,73,209,76,132,187,208, 89,18,169,200,196,
-            135,130,116,188,159,86,164,100,109,198,173,186, 3,64,52,217,226,250,124,123,
-            5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,150,111,253,149,72,130,
-            24,184,79,139,48,27,166,77,146,158,231,83,111,229,122,60,211,133,230,220,105,
-            92,41,55,46,245,40,244,102,143,54,65,25,63,161,1,216,80,73,209,76,132,187,
-            208,89,18,169,200,196,135,130,116,188,159,86,164,100,109,198,173,186,3,64,
-            52,217,226,250,124,123,5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,
-            150,110,84,189,241,210,124,123,5,202,38,147,118,126,255,82,85,212,207,206,59
-        )
-        setSeed(12345L, source)
+        setSeed(seed)
     }
 
-    fun setSeed(seed: Long, source: IntArray? = null) {
-        val base = source ?: IntArray(256) { it }
+    fun setSeed(seed: Long) {
+        val base = IntArray(256) { it }
         val random = java.util.Random(seed)
-        if (source == null) {
-            // Shuffle
-            for (i in 255 downTo 1) {
-                val j = random.nextInt(i + 1)
-                val temp = base[i]
-                base[i] = base[j]
-                base[j] = temp
-            }
+        // Shuffle base array
+        for (i in 255 downTo 1) {
+            val j = random.nextInt(i + 1)
+            val temp = base[i]
+            base[i] = base[j]
+            base[j] = temp
         }
         for (i in 0..255) {
             p[i] = base[i]
@@ -54,10 +36,12 @@ object SimplexNoise {
         }
     }
 
-    private const val F2 = 0.5f * (3.16227766f - 1.0f) // (sqrt(3.0)-1.0)/2.0
-    private const val G2 = (3.0f - 3.16227766f) / 6.0f // (3.0-sqrt(3.0))/6.0
-    private const val F3 = 1.0f / 3.0f
-    private const val G3 = 1.0f / 6.0f
+    companion object {
+        private const val F2 = 0.366025403f // 0.5f * (sqrt(3.0f) - 1.0f)
+        private const val G2 = 0.211324865f // (3.0f - sqrt(3.0f)) / 6.0f
+        private const val F3 = 1.0f / 3.0f
+        private const val G3 = 1.0f / 6.0f
+    }
 
     fun noise2D(xin: Float, yin: Float): Float {
         var n0 = 0f; var n1 = 0f; var n2 = 0f

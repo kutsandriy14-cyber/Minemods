@@ -51,19 +51,30 @@ class MainActivity : ComponentActivity() {
                     NavHost(navController = navController, startDestination = "menu") {
                         composable("menu") {
                             MainMenu(
-                                onPlayClick = { worldName -> navController.navigate("game/$worldName") },
+                                onPlayClick = { worldName, mode, ip -> 
+                                    navController.navigate("game/$worldName?mode=$mode&ip=$ip") 
+                                },
                                 onSettingsClick = { navController.navigate("settings") },
                                 onExitClick = { finish() }
                             )
                         }
                         composable(
-                            route = "game/{worldName}",
-                            arguments = listOf(navArgument("worldName") { type = NavType.StringType })
+                            route = "game/{worldName}?mode={mode}&ip={ip}",
+                            arguments = listOf(
+                                navArgument("worldName") { type = NavType.StringType },
+                                navArgument("mode") { type = NavType.StringType; defaultValue = "single" },
+                                navArgument("ip") { type = NavType.StringType; defaultValue = "" }
+                            )
                         ) { backStackEntry ->
                             val worldName = backStackEntry.arguments?.getString("worldName") ?: "default"
+                            val mode = backStackEntry.arguments?.getString("mode") ?: "single"
+                            val ip = backStackEntry.arguments?.getString("ip") ?: ""
                             GameScreen(
                                 worldName = worldName,
-                                onSettingsClick = { navController.navigate("settings") }
+                                mode = mode,
+                                ip = ip,
+                                onSettingsClick = { navController.navigate("settings") },
+                                onBackClick = { navController.navigate("menu") { popUpTo("menu") { inclusive = true } } }
                             )
                         }
                         composable("settings") {
@@ -79,12 +90,15 @@ class MainActivity : ComponentActivity() {
 enum class MenuState {
     MAIN,
     WORLD_SELECT,
-    CREATE_WORLD
+    CREATE_WORLD,
+    MULTIPLAYER,
+    HOST_SELECT,
+    JOIN_INPUT
 }
 
 @Composable
 fun MainMenu(
-    onPlayClick: (worldName: String) -> Unit,
+    onPlayClick: (worldName: String, mode: String, ip: String) -> Unit,
     onSettingsClick: () -> Unit,
     onExitClick: () -> Unit
 ) {
@@ -92,9 +106,9 @@ fun MainMenu(
     var menuState by remember { mutableStateOf(MenuState.MAIN) }
     var worldsList by remember { mutableStateOf(emptyList<String>()) }
     
-    // Refresh worlds list when entering WORLD_SELECT state
+    // Refresh worlds list when entering WORLD_SELECT or HOST_SELECT state
     LaunchedEffect(menuState) {
-        if (menuState == MenuState.WORLD_SELECT) {
+        if (menuState == MenuState.WORLD_SELECT || menuState == MenuState.HOST_SELECT) {
             worldsList = WorldSaveManager.getWorldList(context)
         }
     }
@@ -181,8 +195,12 @@ fun MainMenu(
                     )
 
                     // Retro Style Buttons
-                    RetroMenuButton(text = "PLAY WORLD") {
+                    RetroMenuButton(text = "PLAY OFFLINE") {
                         menuState = MenuState.WORLD_SELECT
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    RetroMenuButton(text = "MULTIPLAYER") {
+                        menuState = MenuState.MULTIPLAYER
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     RetroMenuButton(text = "SETTINGS", onClick = onSettingsClick)
@@ -242,7 +260,7 @@ fun MainMenu(
                                         shape = RoundedCornerShape(4.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { onPlayClick(worldName) }
+                                            .clickable { onPlayClick(worldName, "single", "") }
                                     ) {
                                         Row(
                                             modifier = Modifier
@@ -385,7 +403,7 @@ fun MainMenu(
                         Button(
                             onClick = {
                                 val name = worldNameInput.trim().ifEmpty { "World_${System.currentTimeMillis() % 10000}" }
-                                onPlayClick(name)
+                                onPlayClick(name, "single", "")
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
                             shape = RoundedCornerShape(4.dp),
@@ -397,6 +415,209 @@ fun MainMenu(
 
                         Button(
                             onClick = { menuState = MenuState.WORLD_SELECT },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                            shape = RoundedCornerShape(4.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Text("CANCEL", color = Color.White, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            
+            MenuState.MULTIPLAYER -> {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Text(
+                        text = "LAN MULTIPLAYER",
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFFFB300),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text(
+                        text = "Play together on the same Wi-Fi network",
+                        color = Color.LightGray,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(bottom = 48.dp)
+                    )
+
+                    RetroMenuButton(text = "HOST LAN GAME") {
+                        menuState = MenuState.HOST_SELECT
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    RetroMenuButton(text = "JOIN LAN GAME") {
+                        menuState = MenuState.JOIN_INPUT
+                    }
+                    Spacer(modifier = Modifier.height(32.dp))
+                    RetroMenuButton(text = "BACK") {
+                        menuState = MenuState.MAIN
+                    }
+                }
+            }
+
+            MenuState.HOST_SELECT -> {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(450.dp)
+                        .padding(24.dp)
+                ) {
+                    Text(
+                        text = "HOST MULTIPLAYER WORLD",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFFFB300),
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                    ) {
+                        if (worldsList.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No worlds saved yet.\nCreate one in singleplayer first!",
+                                    color = Color.LightGray,
+                                    fontFamily = FontFamily.Monospace,
+                                    textAlign = TextAlign.Center,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize().padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(worldsList) { worldName ->
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.1f)),
+                                        shape = RoundedCornerShape(4.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onPlayClick(worldName, "host", "") }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text(
+                                                    text = worldName,
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 16.sp
+                                                )
+                                                Text(
+                                                    text = "Co-Op Host Server",
+                                                    color = Color.Green.copy(alpha = 0.7f),
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    RetroMenuButton(text = "BACK") {
+                        menuState = MenuState.MULTIPLAYER
+                    }
+                }
+            }
+
+            MenuState.JOIN_INPUT -> {
+                var ipInput by remember { mutableStateOf("") }
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .width(400.dp)
+                        .padding(24.dp)
+                ) {
+                    Text(
+                        text = "JOIN LAN SERVER",
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFFFB300),
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    Text(
+                        text = "Enter the host's local IP address:",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(bottom = 24.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = ipInput,
+                        onValueChange = { ipInput = it },
+                        label = { Text("Host IP Address", fontFamily = FontFamily.Monospace) },
+                        placeholder = { Text("e.g. 192.168.1.100", fontFamily = FontFamily.Monospace) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFFFFB300),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.5f),
+                            focusedLabelColor = Color(0xFFFFB300),
+                            unfocusedLabelColor = Color.White.copy(alpha = 0.7f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val ip = ipInput.trim()
+                                if (ip.isNotEmpty()) {
+                                    onPlayClick("multiplayer_joined", "client", ip)
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            shape = RoundedCornerShape(4.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Text("CONNECT", color = Color.White, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { menuState = MenuState.MULTIPLAYER },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
                             shape = RoundedCornerShape(4.dp),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color.Black),

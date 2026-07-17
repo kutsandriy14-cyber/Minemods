@@ -16,41 +16,63 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import com.example.game.Player
 import com.example.world.World
 import com.example.game.BlockRegistry
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.changedToDown
+import com.example.engine.NetworkManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import com.example.engine.Vector3f
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.input.pointer.pointerInteropFilter
-import androidx.compose.ui.ExperimentalComposeUiApi
 import android.content.Context
 import com.example.world.WorldSaveManager
 import java.io.File
+import androidx.compose.ui.ExperimentalComposeUiApi
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun GameScreen(worldName: String, onSettingsClick: () -> Unit) {
+fun GameScreen(
+    worldName: String,
+    mode: String = "single",
+    ip: String = "",
+    onSettingsClick: () -> Unit,
+    onBackClick: () -> Unit
+) {
     val context = LocalContext.current
     val world = remember { 
         World().apply { 
-            // Try loading world; generate new one if file doesn't exist
-            val playerPlaceholder = Player(this)
-            val success = WorldSaveManager.loadWorld(context, worldName, this, playerPlaceholder)
-            if (!success) {
-                seed = worldName.hashCode().toLong()
-                generateInitialWorld()
+            if (mode != "client") {
+                // Try loading world; generate new one if file doesn't exist
+                val playerPlaceholder = Player(this)
+                val success = WorldSaveManager.loadWorld(context, worldName, this, playerPlaceholder)
+                if (!success) {
+                    seed = worldName.hashCode().toLong()
+                    generateInitialWorld()
+                }
+            } else {
+                // Client gets seed and chunks from host over socket!
+                seed = 123456L
             }
         }
     }
     val player = remember { 
         Player(world).apply {
-            val saveFile = File(WorldSaveManager.getWorldsDir(context), "$worldName/level.dat")
-            if (!saveFile.exists()) {
-                val spawnY = world.getSpawnHeight(0, 0)
-                camera.position.set(0.5f, spawnY, 0.5f)
+            if (mode != "client") {
+                val saveFile = File(WorldSaveManager.getWorldsDir(context), "$worldName/level.dat")
+                if (!saveFile.exists()) {
+                    val spawnY = world.getSpawnHeight(0, 0)
+                    camera.position.set(0.5f, spawnY, 0.5f)
+                } else {
+                    WorldSaveManager.loadWorld(context, worldName, world, this)
+                }
             } else {
-                WorldSaveManager.loadWorld(context, worldName, world, this)
+                // Client initial spawn placement
+                camera.position.set(8.0f, 65f, 8.0f)
             }
         }
     }
@@ -76,7 +98,54 @@ fun GameScreen(worldName: String, onSettingsClick: () -> Unit) {
     val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     var fpsLimit by remember { mutableStateOf(preferences.getInt("fpsLimit", 60)) }
     
+    var isConnecting by remember { mutableStateOf(mode == "client") }
+    var connectionError by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(Unit) {
+        if (mode == "host") {
+            NetworkManager.startHost(world) {
+                // Host server started!
+            }
+        } else if (mode == "client") {
+            NetworkManager.startClient(
+                hostIp = ip,
+                world = world,
+                onConnectSuccess = {
+                    isConnecting = false
+                },
+                onConnectFailed = {
+                    connectionError = "Failed to connect to Host at $ip.\nCheck IP address, Wi-Fi network, and make sure the Host has started the game."
+                }
+            )
+        }
+
+        // Register network callback for real-time block synchronization
+        NetworkManager.setOnBlockChangeCallback { bx, by, bz, type ->
+            val cx = bx shr 4
+            val cz = bz shr 4
+            world.chunks[Pair(cx, cz)]?.isModified = true
+        }
+
+        // Asynchronous background thread loop for generating/loading infinite chunks around the player
+        launch(Dispatchers.IO) {
+            while (isActive) {
+                world.updateChunksAroundPlayer(player.camera.position.x, player.camera.position.z)
+                delay(500)
+            }
+        }
+
+        // Asynchronous background thread loop for broadcasting our player position to multiplayer peers
+        launch(Dispatchers.IO) {
+            while (isActive) {
+                NetworkManager.sendPlayerPosition(
+                    player.camera.position.x,
+                    player.camera.position.y,
+                    player.camera.position.z
+                )
+                delay(50)
+            }
+        }
+
         var lastTime = System.nanoTime()
         var frames = 0
         var lastFpsTime = lastTime
@@ -121,9 +190,64 @@ fun GameScreen(worldName: String, onSettingsClick: () -> Unit) {
     DisposableEffect(Unit) {
         onDispose {
             WorldSaveManager.saveWorld(context, worldName, world, player)
+            NetworkManager.stop()
         }
     }
     
+    if (isConnecting) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF14304A)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(32.dp)
+            ) {
+                Text(
+                    text = "CONNECTING TO HOST...",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFFFFB300),
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Syncing world seed and generating synchronized chunks...",
+                    color = Color.LightGray,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(32.dp))
+                CircularProgressIndicator(color = Color(0xFFFFB300))
+                
+                connectionError?.let { err ->
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Text(
+                        text = err,
+                        color = Color.Red,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Button(
+                        onClick = onBackClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text("BACK TO LOBBY", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        return
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // 3D Viewport
         AndroidView(
@@ -407,11 +531,25 @@ fun GameScreen(worldName: String, onSettingsClick: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalComposeUiApi::class)
-fun Modifier.pointerInputHoverLike(onAction: (Boolean) -> Unit): Modifier = this.pointerInteropFilter {
-    when (it.action) {
-        android.view.MotionEvent.ACTION_DOWN -> { onAction(true); true }
-        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { onAction(false); true }
-        else -> false
+fun Modifier.pointerInputHoverLike(onAction: (Boolean) -> Unit): Modifier = this.pointerInput(onAction) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            val initialDown = event.changes.firstOrNull { it.changedToDown() }
+            if (initialDown != null) {
+                val pointerId = initialDown.id
+                onAction(true)
+                
+                var isDown = true
+                while (isDown) {
+                    val nextEvent = awaitPointerEvent()
+                    val change = nextEvent.changes.firstOrNull { it.id == pointerId }
+                    if (change == null || !change.pressed) {
+                        isDown = false
+                        onAction(false)
+                    }
+                }
+            }
+        }
     }
 }

@@ -20,6 +20,7 @@ class ChunkMesh {
             isReady = true
             return
         }
+        isReady = false // FORCE OPENGL REBUILD!
         
         val bb = ByteBuffer.allocateDirect(vertexData.size * 4)
         bb.order(ByteOrder.nativeOrder())
