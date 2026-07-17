@@ -40,6 +40,12 @@ class VoxelRenderer(private val context: Context, private val world: World, val 
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        // Clean up any meshes that were unloaded on the background thread
+        while (true) {
+            val mesh = world.meshesToDestroy.poll() ?: break
+            mesh.destroy()
+        }
+
         if (world.isNight) {
             GLES30.glClearColor(0.04f, 0.05f, 0.1f, 1.0f) // Midnight/Space color
         } else {

@@ -41,33 +41,98 @@ object TextureManager {
         val canvas = android.graphics.Canvas(bitmap)
         val paint = android.graphics.Paint()
         
-        // Grass top (0, 0)
-        paint.color = android.graphics.Color.rgb(85, 170, 85)
-        canvas.drawRect(0f, 0f, 16f, 16f, paint)
-        paint.color = android.graphics.Color.rgb(65, 150, 65)
-        canvas.drawRect(2f, 2f, 6f, 6f, paint)
+        // Helper to draw a single pixel at (x, y) with a specific color
+        fun drawPixel(x: Float, y: Float, color: Int) {
+            paint.color = color
+            canvas.drawRect(x, y, x + 1f, y + 1f, paint)
+        }
+
+        // 1. Grass top (0, 0)
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val noise = ((px * 17 + py * 31) % 5)
+                val color = when (noise) {
+                    0 -> android.graphics.Color.rgb(75, 150, 75)
+                    1 -> android.graphics.Color.rgb(95, 185, 95)
+                    2 -> android.graphics.Color.rgb(60, 135, 60)
+                    3 -> android.graphics.Color.rgb(105, 200, 105)
+                    else -> android.graphics.Color.rgb(85, 170, 85)
+                }
+                drawPixel(px.toFloat(), py.toFloat(), color)
+            }
+        }
         
-        // Dirt (1, 0)
-        paint.color = android.graphics.Color.rgb(134, 96, 67)
-        canvas.drawRect(16f, 0f, 32f, 16f, paint)
-        paint.color = android.graphics.Color.rgb(104, 76, 47)
-        canvas.drawRect(18f, 4f, 22f, 8f, paint)
+        // 2. Dirt (1, 0) - offset x = 16
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val noise = ((px * 23 + py * 13) % 5)
+                val color = when (noise) {
+                    0 -> android.graphics.Color.rgb(114, 76, 47)
+                    1 -> android.graphics.Color.rgb(144, 106, 77)
+                    2 -> android.graphics.Color.rgb(94, 61, 35)
+                    3 -> android.graphics.Color.rgb(124, 86, 57)
+                    else -> android.graphics.Color.rgb(134, 96, 67)
+                }
+                drawPixel(16f + px, py.toFloat(), color)
+            }
+        }
         
-        // Grass side (2, 0)
-        paint.color = android.graphics.Color.rgb(134, 96, 67)
-        canvas.drawRect(32f, 0f, 48f, 16f, paint)
-        paint.color = android.graphics.Color.rgb(85, 170, 85)
-        canvas.drawRect(32f, 0f, 48f, 4f, paint)
+        // 3. Grass side (2, 0) - offset x = 32
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val isGrass = py < 4 || (py == 4 && px % 2 == 0) || (py == 5 && px % 4 == 1)
+                val color = if (isGrass) {
+                    val noise = ((px * 17 + py * 31) % 5)
+                    when (noise) {
+                        0 -> android.graphics.Color.rgb(75, 150, 75)
+                        1 -> android.graphics.Color.rgb(95, 185, 95)
+                        2 -> android.graphics.Color.rgb(60, 135, 60)
+                        3 -> android.graphics.Color.rgb(105, 200, 105)
+                        else -> android.graphics.Color.rgb(85, 170, 85)
+                    }
+                } else {
+                    val noise = ((px * 23 + py * 13) % 5)
+                    when (noise) {
+                        0 -> android.graphics.Color.rgb(114, 76, 47)
+                        1 -> android.graphics.Color.rgb(144, 106, 77)
+                        2 -> android.graphics.Color.rgb(94, 61, 35)
+                        3 -> android.graphics.Color.rgb(124, 86, 57)
+                        else -> android.graphics.Color.rgb(134, 96, 67)
+                    }
+                }
+                drawPixel(32f + px, py.toFloat(), color)
+            }
+        }
         
-        // Stone (3, 0)
-        paint.color = android.graphics.Color.rgb(128, 128, 128)
-        canvas.drawRect(48f, 0f, 64f, 16f, paint)
-        paint.color = android.graphics.Color.rgb(100, 100, 100)
-        canvas.drawRect(50f, 50f, 60f, 60f, paint) // just noise
+        // 4. Stone (3, 0) - offset x = 48
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val noise = ((px * 19 + py * 29) % 6)
+                val isCrack = (px + py == 8 || px + py == 16 || px - py == 4)
+                val isHighlight = (px + py == 5 || px == 2 || py == 2)
+                val color = when {
+                    isCrack -> android.graphics.Color.rgb(90, 90, 90)
+                    isHighlight -> android.graphics.Color.rgb(150, 150, 150)
+                    noise == 0 -> android.graphics.Color.rgb(110, 110, 110)
+                    noise == 1 -> android.graphics.Color.rgb(135, 135, 135)
+                    else -> android.graphics.Color.rgb(125, 125, 125)
+                }
+                drawPixel(48f + px, py.toFloat(), color)
+            }
+        }
         
-        // Sand (4, 0)
-        paint.color = android.graphics.Color.rgb(219, 209, 159)
-        canvas.drawRect(64f, 0f, 80f, 16f, paint)
+        // 5. Sand (4, 0) - offset x = 64
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val ripple = (px + py / 2) % 4
+                val color = when (ripple) {
+                    0 -> android.graphics.Color.rgb(209, 199, 149)
+                    1 -> android.graphics.Color.rgb(229, 219, 169)
+                    else -> android.graphics.Color.rgb(219, 209, 159)
+                }
+                drawPixel(64f + px, py.toFloat(), color)
+            }
+        }
         
         return bitmap
     }

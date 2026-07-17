@@ -141,8 +141,7 @@ fun SettingsScreen(navController: NavController) {
                                 renderDistance = it
                                 preferences.edit().putFloat("renderDistance", it).apply()
                             },
-                            valueRange = 4f..32f,
-                            steps = 28,
+                            valueRange = 4f..512f,
                             colors = SliderDefaults.colors(
                                 thumbColor = Color(0xFFFFB300),
                                 activeTrackColor = Color(0xFFFFB300),

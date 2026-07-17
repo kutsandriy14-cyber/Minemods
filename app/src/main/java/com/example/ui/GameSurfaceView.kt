@@ -13,6 +13,7 @@ class GameSurfaceView(context: Context, val world: World, val player: Player) : 
     
     private var lastX = 0f
     private var lastY = 0f
+    private var cameraPointerId = -1
     
     init {
         setEGLContextClientVersion(3)
@@ -21,40 +22,56 @@ class GameSurfaceView(context: Context, val world: World, val player: Player) : 
         renderMode = RENDERMODE_CONTINUOUSLY
     }
     
-    private var isDraggingCamera = false
-    
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        // Only look around if touching the right half of the screen
-        val x = e.x
-        val y = e.y
+        val action = e.actionMasked
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val sensitivity = prefs.getFloat("sensitivity", 1.0f)
         
-        when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                if (x > width / 2f) {
-                    isDraggingCamera = true
+        when (action) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                val actionIndex = e.actionIndex
+                val pointerId = e.getPointerId(actionIndex)
+                val x = e.getX(actionIndex)
+                
+                // If we are not currently tracking a look-around touch,
+                // and this touch is on the right half of the screen, capture it!
+                if (cameraPointerId == -1 && x > width / 2f) {
+                    cameraPointerId = pointerId
                     lastX = x
-                    lastY = y
-                } else {
-                    isDraggingCamera = false
+                    lastY = e.getY(actionIndex)
                 }
             }
             MotionEvent.ACTION_MOVE -> {
-                if (isDraggingCamera) {
-                    val dx = x - lastX
-                    val dy = y - lastY
-                    
-                    player.camera.yaw += dx * 0.25f
-                    player.camera.pitch -= dy * 0.25f
-                    
-                    if (player.camera.pitch > 89.0f) player.camera.pitch = 89.0f
-                    if (player.camera.pitch < -89.0f) player.camera.pitch = -89.0f
-                    
-                    lastX = x
-                    lastY = y
+                if (cameraPointerId != -1) {
+                    val pointerIndex = e.findPointerIndex(cameraPointerId)
+                    if (pointerIndex != -1) {
+                        val x = e.getX(pointerIndex)
+                        val y = e.getY(pointerIndex)
+                        
+                        val dx = x - lastX
+                        val dy = y - lastY
+                        
+                        // Apply movement with sensitivity multiplier
+                        player.camera.yaw += dx * 0.20f * sensitivity
+                        player.camera.pitch -= dy * 0.20f * sensitivity
+                        
+                        if (player.camera.pitch > 89.0f) player.camera.pitch = 89.0f
+                        if (player.camera.pitch < -89.0f) player.camera.pitch = -89.0f
+                        
+                        lastX = x
+                        lastY = y
+                    }
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                val actionIndex = e.actionIndex
+                val pointerId = e.getPointerId(actionIndex)
+                if (pointerId == cameraPointerId) {
+                    cameraPointerId = -1
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                isDraggingCamera = false
+                cameraPointerId = -1
             }
         }
         return true

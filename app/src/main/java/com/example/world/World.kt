@@ -23,15 +23,16 @@ class World {
     
     // Calculate the exact terrain height at a world (x, z) coordinate
     fun getTerrainHeight(x: Int, z: Int): Int {
-        // Base elevation noise (frequencies and octaves)
-        val nx = x.toFloat() * 0.015f
-        val nz = z.toFloat() * 0.015f
+        // 1.18 style terrain generation with larger scale and higher base
+        val nx = x.toFloat() * 0.005f
+        val nz = z.toFloat() * 0.005f
         
-        val baseNoise = noise.noise2D(nx, nz) * 12f
-        val detailNoise = noise.noise2D(nx * 4.0f, nz * 4.0f) * 3f
+        val continentalness = noise.noise2D(nx, nz) * 20f
+        val erosion = noise.noise2D(nx * 2.0f + 100f, nz * 2.0f + 100f) * 10f
+        val peaks = noise.noise2D(nx * 5.0f + 200f, nz * 5.0f + 200f) * 15f
         
-        // Final height between 10 and 60
-        return (28f + baseNoise + detailNoise).toInt().coerceIn(10, 80)
+        // Final height shifted up to allow deep caves below
+        return (80f + continentalness + erosion + peaks).toInt().coerceIn(30, 150)
     }
 
     fun getBiomeAt(x: Int, z: Int): Byte {
@@ -45,9 +46,21 @@ class World {
     }
 
     fun isCave(x: Int, y: Int, z: Int): Boolean {
-        if (y > 30) return false // No caves too close to surface to prevent ruined landscape
-        val caveNoise = noise.noise3D(x.toFloat() * 0.07f, y.toFloat() * 0.07f, z.toFloat() * 0.07f)
-        return caveNoise > 0.45f
+        if (y > 130) return false // No caves too close to highest peaks
+        
+        // 1.18 Cheese caves (large open caverns)
+        val cheese = noise.noise3D(x * 0.02f, y * 0.02f, z * 0.02f)
+        if (cheese > 0.35f) return true
+        
+        // 1.18 Spaghetti caves (long winding tunnels)
+        val spaghetti1 = noise.noise3D(x * 0.04f, y * 0.04f, z * 0.04f)
+        val spaghetti2 = noise.noise3D(x * 0.04f + 100f, y * 0.04f + 100f, z * 0.04f + 100f)
+        
+        // A tunnel is where two noises are close to 0 (intersection of two planes)
+        val isSpaghetti = Math.abs(spaghetti1) < 0.06f && Math.abs(spaghetti2) < 0.06f
+        if (isSpaghetti) return true
+        
+        return false
     }
     
     fun getBlock(x: Int, y: Int, z: Int): Byte {
@@ -150,17 +163,35 @@ class World {
         return chunk
     }
 
-    fun updateChunksAroundPlayer(playerX: Float, playerZ: Float) {
+    val meshesToDestroy = java.util.concurrent.ConcurrentLinkedQueue<com.example.engine.ChunkMesh>()
+
+    fun updateChunksAroundPlayer(playerX: Float, playerZ: Float, radius: Int = 4) {
         val playerCx = Math.floor(playerX.toDouble() / 16.0).toInt()
         val playerCz = Math.floor(playerZ.toDouble() / 16.0).toInt()
-        val radius = 4 // 9x9 chunk area around player
         
+        // Generate chunks within radius
         for (cx in (playerCx - radius)..(playerCx + radius)) {
             for (cz in (playerCz - radius)..(playerCz + radius)) {
                 val pair = Pair(cx, cz)
                 if (!chunks.containsKey(pair)) {
                     generateChunk(cx, cz)
                 }
+            }
+        }
+        
+        // Unload chunks that are too far away to conserve memory and maintain smooth FPS
+        val unloadThreshold = radius + 2
+        val iterator = chunks.keys.iterator()
+        while (iterator.hasNext()) {
+            val coords = iterator.next()
+            val dx = Math.abs(coords.first - playerCx)
+            val dz = Math.abs(coords.second - playerCz)
+            if (dx > unloadThreshold || dz > unloadThreshold) {
+                val removed = chunks[coords]
+                if (removed != null) {
+                    meshesToDestroy.add(removed.mesh)
+                }
+                iterator.remove()
             }
         }
     }

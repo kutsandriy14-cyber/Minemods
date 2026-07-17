@@ -45,6 +45,8 @@ class Player(val world: World) {
     var canBuild: Boolean = true
     var canBreak: Boolean = true
 
+    val inventory = Inventory()
+    
     // Position is camera.position
     var velocity = Vector3f()
     var isGrounded = false
@@ -54,13 +56,58 @@ class Player(val world: World) {
     val height = 1.8f
 
     data class AABB(
-        val minX: Float, val minY: Float, val minZ: Float,
-        val maxX: Float, val maxY: Float, val maxZ: Float
+        var minX: Float, var minY: Float, var minZ: Float,
+        var maxX: Float, var maxY: Float, var maxZ: Float
     ) {
         fun intersects(o: AABB): Boolean {
             return this.maxX > o.minX && this.minX < o.maxX &&
                    this.maxY > o.minY && this.minY < o.maxY &&
                    this.maxZ > o.minZ && this.minZ < o.maxZ
+        }
+        
+        fun offset(dx: Float, dy: Float, dz: Float) {
+            minX += dx; maxX += dx
+            minY += dy; maxY += dy
+            minZ += dz; maxZ += dz
+        }
+
+        fun calculateXOffset(other: AABB, dx: Float): Float {
+            if (other.maxY > this.minY && other.minY < this.maxY && other.maxZ > this.minZ && other.minZ < this.maxZ) {
+                if (dx > 0 && other.minX >= this.maxX) {
+                    val d = other.minX - this.maxX
+                    if (d < dx) return d - 0.001f
+                } else if (dx < 0 && other.maxX <= this.minX) {
+                    val d = other.maxX - this.minX
+                    if (d > dx) return d + 0.001f
+                }
+            }
+            return dx
+        }
+
+        fun calculateYOffset(other: AABB, dy: Float): Float {
+            if (other.maxX > this.minX && other.minX < this.maxX && other.maxZ > this.minZ && other.minZ < this.maxZ) {
+                if (dy > 0 && other.minY >= this.maxY) {
+                    val d = other.minY - this.maxY
+                    if (d < dy) return d - 0.001f
+                } else if (dy < 0 && other.maxY <= this.minY) {
+                    val d = other.maxY - this.minY
+                    if (d > dy) return d + 0.001f
+                }
+            }
+            return dy
+        }
+
+        fun calculateZOffset(other: AABB, dz: Float): Float {
+            if (other.maxX > this.minX && other.minX < this.maxX && other.maxY > this.minY && other.minY < this.maxY) {
+                if (dz > 0 && other.minZ >= this.maxZ) {
+                    val d = other.minZ - this.maxZ
+                    if (d < dz) return d - 0.001f
+                } else if (dz < 0 && other.maxZ <= this.minZ) {
+                    val d = other.maxZ - this.minZ
+                    if (d > dz) return d + 0.001f
+                }
+            }
+            return dz
         }
     }
 
@@ -131,56 +178,55 @@ class Player(val world: World) {
             camera.position.z += velocity.z * dt
             isGrounded = false
         } else {
-            // 1. Move and resolve X
-            camera.position.x += velocity.x * dt
-            var playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-            var colliders = getSurroundingCollisionBoxes(playerBox)
+            val dx = velocity.x * dt
+            val dy = velocity.y * dt
+            val dz = velocity.z * dt
+            
+            var moveX = dx
+            var moveY = dy
+            var moveZ = dz
+            
+            val playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
+            
+            // Expand AABB to include the destination region for broadphase checking
+            val expandedBox = AABB(
+                playerBox.minX + Math.min(0f, moveX) - 0.1f, playerBox.minY + Math.min(0f, moveY) - 0.1f, playerBox.minZ + Math.min(0f, moveZ) - 0.1f,
+                playerBox.maxX + Math.max(0f, moveX) + 0.1f, playerBox.maxY + Math.max(0f, moveY) + 0.1f, playerBox.maxZ + Math.max(0f, moveZ) + 0.1f
+            )
+            
+            val colliders = getSurroundingCollisionBoxes(expandedBox)
+            
+            // Resolve Y
             for (box in colliders) {
-                if (playerBox.intersects(box)) {
-                    if (velocity.x > 0) {
-                        camera.position.x = box.minX - (width / 2f) - 0.001f
-                    } else if (velocity.x < 0) {
-                        camera.position.x = box.maxX + (width / 2f) + 0.001f
-                    }
-                    velocity.x = 0f
-                    playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-                }
+                moveY = playerBox.calculateYOffset(box, moveY)
+            }
+            playerBox.offset(0f, moveY, 0f)
+            
+            // Resolve X
+            for (box in colliders) {
+                moveX = playerBox.calculateXOffset(box, moveX)
+            }
+            playerBox.offset(moveX, 0f, 0f)
+            
+            // Resolve Z
+            for (box in colliders) {
+                moveZ = playerBox.calculateZOffset(box, moveZ)
+            }
+            playerBox.offset(0f, 0f, moveZ)
+            
+            camera.position.x += moveX
+            camera.position.y += moveY
+            camera.position.z += moveZ
+            
+            if (moveY != dy) {
+                if (dy < 0) isGrounded = true
+                velocity.y = 0f
+            } else {
+                isGrounded = false
             }
             
-            // 2. Move and resolve Z
-            camera.position.z += velocity.z * dt
-            playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-            colliders = getSurroundingCollisionBoxes(playerBox)
-            for (box in colliders) {
-                if (playerBox.intersects(box)) {
-                    if (velocity.z > 0) {
-                        camera.position.z = box.minZ - (width / 2f) - 0.001f
-                    } else if (velocity.z < 0) {
-                        camera.position.z = box.maxZ + (width / 2f) + 0.001f
-                    }
-                    velocity.z = 0f
-                    playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-                }
-            }
-            
-            // 3. Move and resolve Y
-            isGrounded = false
-            camera.position.y += velocity.y * dt
-            playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-            colliders = getSurroundingCollisionBoxes(playerBox)
-            for (box in colliders) {
-                if (playerBox.intersects(box)) {
-                    if (velocity.y > 0) { // Hit ceiling
-                        camera.position.y = box.minY - 0.2f - 0.001f
-                        velocity.y = 0f
-                    } else if (velocity.y < 0) { // Hit ground
-                        camera.position.y = box.maxY + 1.6f + 0.001f
-                        velocity.y = 0f
-                        isGrounded = true
-                    }
-                    playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-                }
-            }
+            if (moveX != dx) velocity.x = 0f
+            if (moveZ != dz) velocity.z = 0f
         }
         
         // Out of bounds safety check (void fallback)
@@ -231,8 +277,9 @@ class Player(val world: World) {
                     )
                     val playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
                     if (noclip || !playerBox.intersects(blockBox)) {
-                        world.setBlock(lastBx, lastBy, lastBz, selectedBlockType)
-                        NetworkManager.sendBlockChange(lastBx, lastBy, lastBz, selectedBlockType)
+                        val blockToPlace = inventory.getSelectedBlock()
+                        world.setBlock(lastBx, lastBy, lastBz, blockToPlace)
+                        NetworkManager.sendBlockChange(lastBx, lastBy, lastBz, blockToPlace)
                     }
                 }
                 return

@@ -102,6 +102,9 @@ fun GameScreen(
     // Settings state
     val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     var fpsLimit by remember { mutableStateOf(preferences.getInt("fpsLimit", 60)) }
+    var renderDistance by remember { mutableStateOf(preferences.getFloat("renderDistance", 8f)) }
+    var textureQuality by remember { mutableStateOf(preferences.getString("textureQuality", "HIGH") ?: "HIGH") }
+    var cameraSensitivity by remember { mutableStateOf(preferences.getFloat("sensitivity", 1.0f)) }
     
     var isConnecting by remember { mutableStateOf(mode == "client") }
     var connectionError by remember { mutableStateOf<String?>(null) }
@@ -134,7 +137,8 @@ fun GameScreen(
         // Asynchronous background thread loop for generating/loading infinite chunks around the player
         launch(Dispatchers.IO) {
             while (isActive) {
-                world.updateChunksAroundPlayer(player.camera.position.x, player.camera.position.z)
+                val currentRadius = preferences.getFloat("renderDistance", 8f).toInt()
+                world.updateChunksAroundPlayer(player.camera.position.x, player.camera.position.z, currentRadius)
                 delay(500)
             }
         }
@@ -336,27 +340,28 @@ fun GameScreen(
             
             // Buttons Top Right
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // OP Tools button
                 Button(
                     onClick = { showAdminPanel = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800).copy(alpha = 0.85f)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.5f)),
                     shape = RoundedCornerShape(8.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFE082))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f))
                 ) {
-                    Text("👑 OP Tools", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("⚙️ Settings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
 
                 Button(
-                    onClick = onSettingsClick,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f)),
-                    shape = RoundedCornerShape(8.dp)
+                    onClick = onBackClick,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red.copy(alpha = 0.6f))
                 ) {
-                    Text("Settings", color = Color.White)
+                    Text("Lobby", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
         }
         
         // 3. Hotbar & Active Item Display (Bottom Center)
+        var triggerRecompose by remember { mutableStateOf(0) } // Used to trigger recomposition when inventory changes
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -364,7 +369,8 @@ fun GameScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Selected item name overlay
-            val blockName = when(selectedBlock) {
+            val selectedBlockId = player.inventory.getSelectedBlock()
+            val blockName = when(selectedBlockId) {
                 BlockRegistry.GRASS -> "Grass Block"
                 BlockRegistry.DIRT -> "Dirt"
                 BlockRegistry.STONE -> "Stone"
@@ -385,7 +391,7 @@ fun GameScreen(
                 )
             }
             
-            // 4-slot Hotbar row
+            // 9-slot Hotbar row
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.4f)),
                 shape = RoundedCornerShape(8.dp),
@@ -394,15 +400,15 @@ fun GameScreen(
                     .padding(4.dp)
             ) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.padding(4.dp)
                 ) {
-                    val blocks = listOf(BlockRegistry.GRASS, BlockRegistry.DIRT, BlockRegistry.STONE, BlockRegistry.SAND)
-                    blocks.forEach { bId ->
-                        val isSelected = selectedBlock == bId
+                    for (slot in 0 until player.inventory.hotbarSize) {
+                        val bId = player.inventory.getBlock(slot)
+                        val isSelected = player.inventory.selectedHotbarSlot == slot
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(40.dp)
                                 .background(
                                     Color.White.copy(alpha = if (isSelected) 0.25f else 0.1f),
                                     RoundedCornerShape(4.dp)
@@ -413,10 +419,10 @@ fun GameScreen(
                                     shape = RoundedCornerShape(4.dp)
                                 )
                                 .clickable {
-                                    selectedBlock = bId
-                                    player.selectedBlockType = bId
+                                    player.inventory.selectedHotbarSlot = slot
+                                    triggerRecompose++ // force UI update
                                 }
-                                .padding(6.dp)
+                                .padding(4.dp)
                         ) {
                             // Custom voxel preview graphic
                             when (bId) {
@@ -571,6 +577,8 @@ fun GameScreen(
         }
 
         if (showAdminPanel) {
+            var activeSettingsTab by remember { mutableStateOf(0) } // 0 = General Settings, 1 = Operator (OP) Tools
+
             AlertDialog(
                 onDismissRequest = { showAdminPanel = false },
                 properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -586,7 +594,7 @@ fun GameScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "👑 OPERATOR & STATE CONTROL",
+                            text = "⚙️ GAME SETTINGS & CONTROL",
                             color = Color(0xFFFFB300),
                             fontWeight = FontWeight.ExtraBold,
                             fontFamily = FontFamily.Monospace,
@@ -599,271 +607,482 @@ fun GameScreen(
                 },
                 text = {
                     Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 4.dp),
+                        modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // 1. Operator Mode Toggle
+                        // Tab Selector Headers
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                .padding(10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Column {
-                                Text(
-                                    text = "OPERATOR STATUS (OP)",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Text(
-                                    text = "Enables commands, abilities, and mode swaps.",
-                                    color = Color.Gray,
-                                    fontSize = 10.sp
-                                )
-                            }
-                            Switch(
-                                checked = player.isOp,
-                                onCheckedChange = { player.isOp = it },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color(0xFFFFB300),
-                                    checkedTrackColor = Color(0xFFFFB300).copy(alpha = 0.5f)
-                                )
-                            )
-                        }
-
-                        if (player.isOp) {
-                            // 2. Select Game Mode Row
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                    .padding(10.dp)
+                            Button(
+                                onClick = { activeSettingsTab = 0 },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (activeSettingsTab == 0) Color(0xFFFFB300) else Color.Transparent
+                                ),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                contentPadding = PaddingValues(0.dp)
                             ) {
                                 Text(
-                                    text = "SELECT GAME MODE:",
-                                    color = Color(0xFFFFB300),
+                                    "⚙️ GENERAL SETTINGS",
+                                    color = if (activeSettingsTab == 0) Color.Black else Color.White,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.padding(bottom = 6.dp)
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
                                 )
+                            }
+
+                            Button(
+                                onClick = { activeSettingsTab = 1 },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (activeSettingsTab == 1) Color(0xFFFFB300) else Color.Transparent
+                                ),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.weight(1f).height(38.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text(
+                                    "👑 OPERATOR (OP) TOOLS",
+                                    color = if (activeSettingsTab == 1) Color.Black else Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+
+                        // Content Based on Active Tab
+                        if (activeSettingsTab == 0) {
+                            // --- GENERAL SETTINGS TAB ---
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                // 1. FPS Limit Slider
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            "FPS LIMIT:",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp
+                                        )
+                                        Text(
+                                            "${fpsLimit} FPS",
+                                            color = Color(0xFFFFB300),
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                    Slider(
+                                        value = fpsLimit.toFloat(),
+                                        onValueChange = { 
+                                            fpsLimit = it.toInt()
+                                            preferences.edit().putInt("fpsLimit", it.toInt()).apply()
+                                        },
+                                        valueRange = 30f..120f,
+                                        steps = 2,
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = Color(0xFFFFB300),
+                                            activeTrackColor = Color(0xFFFFB300),
+                                            inactiveTrackColor = Color.Gray.copy(alpha = 0.3f)
+                                        )
+                                    )
+                                }
+
+                                // 2. Render Distance Slider
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            "RENDER DISTANCE:",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp
+                                        )
+                                        Text(
+                                            "${renderDistance.toInt()} Chunks",
+                                            color = Color(0xFFFFB300),
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                    Slider(
+                                        value = renderDistance,
+                                        onValueChange = { 
+                                            renderDistance = it
+                                            preferences.edit().putFloat("renderDistance", it).apply()
+                                        },
+                                        valueRange = 4f..512f,
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = Color(0xFFFFB300),
+                                            activeTrackColor = Color(0xFFFFB300),
+                                            inactiveTrackColor = Color.Gray.copy(alpha = 0.3f)
+                                        )
+                                    )
+                                }
+
+                                // 3. Camera Sensitivity Slider
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            "CAMERA SENSITIVITY:",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp
+                                        )
+                                        Text(
+                                            String.format("%.1fx", cameraSensitivity),
+                                            color = Color(0xFFFFB300),
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                    Slider(
+                                        value = cameraSensitivity,
+                                        onValueChange = { 
+                                            cameraSensitivity = it
+                                            preferences.edit().putFloat("sensitivity", it).apply()
+                                        },
+                                        valueRange = 0.2f..2.0f,
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = Color(0xFFFFB300),
+                                            activeTrackColor = Color(0xFFFFB300),
+                                            inactiveTrackColor = Color.Gray.copy(alpha = 0.3f)
+                                        )
+                                    )
+                                }
+
+                                // 4. Texture Quality Selector
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Player.GameMode.values().forEach { gMode ->
-                                        val isCurrent = player.gameMode == gMode
-                                        Button(
-                                            onClick = { player.gameMode = gMode },
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (isCurrent) Color(0xFFFFB300) else Color(0xFF334155)
-                                            ),
-                                            shape = RoundedCornerShape(6.dp),
-                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                                            modifier = Modifier.weight(1f).height(38.dp)
-                                        ) {
-                                            Text(
-                                                text = when(gMode) {
-                                                    Player.GameMode.SURVIVAL -> "SURVIVAL 🏕️"
-                                                    Player.GameMode.CREATIVE -> "CREATIVE 🎨"
-                                                    Player.GameMode.SPECTATOR -> "SPECTATOR 👁️"
+                                    Text(
+                                        "TEXTURE QUALITY:",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 12.sp
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        listOf("LOW", "MEDIUM", "HIGH").forEach { quality ->
+                                            val isSelected = textureQuality == quality
+                                            Button(
+                                                onClick = {
+                                                    textureQuality = quality
+                                                    preferences.edit().putString("textureQuality", quality).apply()
                                                 },
-                                                color = if (isCurrent) Color.Black else Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 10.sp,
-                                                fontFamily = FontFamily.Monospace
-                                            )
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = if (isSelected) Color(0xFFFFB300) else Color(0xFF334155)
+                                                ),
+                                                shape = RoundedCornerShape(4.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                modifier = Modifier.height(32.dp)
+                                            ) {
+                                                Text(
+                                                    text = quality,
+                                                    color = if (isSelected) Color.Black else Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
-
-                            // 3. Permissions Checklist
+                        } else {
+                            // --- OPERATOR TOOLS TAB ---
                             Column(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                    .padding(10.dp)
+                                    .fillMaxSize()
+                                    .padding(horizontal = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text(
-                                    text = "ABILITIES & PERMISSIONS:",
-                                    color = Color(0xFFFFB300),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.padding(bottom = 6.dp)
-                                )
-                                
-                                // Fly switch
+                                // 1. Operator Mode Toggle
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().height(32.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                        .padding(8.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Can Fly (Полет)", color = Color.White, fontSize = 12.sp)
+                                    Column {
+                                        Text(
+                                            text = "OPERATOR STATUS (OP)",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Text(
+                                            text = "Enables creative mode commands and block tools.",
+                                            color = Color.Gray,
+                                            fontSize = 10.sp
+                                        )
+                                    }
                                     Switch(
-                                        checked = player.canFly,
-                                        onCheckedChange = { player.canFly = it }
+                                        checked = player.isOp,
+                                        onCheckedChange = { player.isOp = it },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color(0xFFFFB300),
+                                            checkedTrackColor = Color(0xFFFFB300).copy(alpha = 0.5f)
+                                        )
                                     )
                                 }
-                                
-                                // Noclip switch
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().height(32.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Noclip (Сквозь блоки)", color = Color.White, fontSize = 12.sp)
-                                    Switch(
-                                        checked = player.noclip,
-                                        onCheckedChange = { player.noclip = it }
-                                    )
-                                }
-                                
-                                // Build permission switch
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().height(32.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Can Place (Ставить блоки)", color = Color.White, fontSize = 12.sp)
-                                    Switch(
-                                        checked = player.canBuild,
-                                        onCheckedChange = { player.canBuild = it }
-                                    )
-                                }
-                                
-                                // Break permission switch
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().height(32.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Can Break (Ломать блоки)", color = Color.White, fontSize = 12.sp)
-                                    Switch(
-                                        checked = player.canBreak,
-                                        onCheckedChange = { player.canBreak = it }
-                                    )
-                                }
-                            }
 
-                            // 4. Special commands
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                    .padding(10.dp)
-                            ) {
-                                Text(
-                                    text = "COMMAND CENTER:",
-                                    color = Color(0xFFFFB300),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.padding(bottom = 6.dp)
-                                )
-                                
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    // Day command
-                                    Button(
-                                        onClick = { world.isNight = false },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
-                                        shape = RoundedCornerShape(4.dp),
-                                        contentPadding = PaddingValues(0.dp),
-                                        modifier = Modifier.weight(1f).height(32.dp)
+                                if (player.isOp) {
+                                    // 2. Select Game Mode Row
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                            .padding(8.dp)
                                     ) {
-                                        Text("☀️ SET DAY", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    
-                                    // Night command
-                                    Button(
-                                        onClick = { world.isNight = true },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF311B92)),
-                                        shape = RoundedCornerShape(4.dp),
-                                        contentPadding = PaddingValues(0.dp),
-                                        modifier = Modifier.weight(1f).height(32.dp)
-                                    ) {
-                                        Text("🌙 SET NIGHT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                                
-                                Spacer(modifier = Modifier.height(6.dp))
-                                
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    // Teleport Spawn command
-                                    Button(
-                                        onClick = {
-                                            val spawnY = world.getSpawnHeight(0, 0)
-                                            player.camera.position.set(0.5f, spawnY, 0.5f)
-                                            player.velocity.set(0f, 0f, 0f)
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C)),
-                                        shape = RoundedCornerShape(4.dp),
-                                        contentPadding = PaddingValues(0.dp),
-                                        modifier = Modifier.weight(1f).height(32.dp)
-                                    ) {
-                                        Text("🏠 TO SPAWN", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    
-                                    // Unstuck / Teleport up command
-                                    Button(
-                                        onClick = {
-                                            val curX = Math.floor(player.camera.position.x.toDouble()).toInt()
-                                            val curY = Math.floor(player.camera.position.y.toDouble()).toInt()
-                                            val curZ = Math.floor(player.camera.position.z.toDouble()).toInt()
-                                            
-                                            var foundY = -1
-                                            for (y in curY..250) {
-                                                if (!BlockRegistry.isSolid(world.getBlock(curX, y, curZ)) &&
-                                                    !BlockRegistry.isSolid(world.getBlock(curX, y + 1, curZ))) {
-                                                    foundY = y
-                                                    break
+                                        Text(
+                                            text = "SELECT GAME MODE:",
+                                            color = Color(0xFFFFB300),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.padding(bottom = 6.dp)
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Player.GameMode.values().forEach { gMode ->
+                                                val isCurrent = player.gameMode == gMode
+                                                Button(
+                                                    onClick = { player.gameMode = gMode },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = if (isCurrent) Color(0xFFFFB300) else Color(0xFF334155)
+                                                    ),
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                                                    modifier = Modifier.weight(1f).height(36.dp)
+                                                ) {
+                                                    Text(
+                                                        text = when(gMode) {
+                                                            Player.GameMode.SURVIVAL -> "SURVIVAL"
+                                                            Player.GameMode.CREATIVE -> "CREATIVE"
+                                                            Player.GameMode.SPECTATOR -> "SPECTATOR"
+                                                        },
+                                                        color = if (isCurrent) Color.Black else Color.White,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 10.sp,
+                                                        fontFamily = FontFamily.Monospace
+                                                    )
                                                 }
                                             }
-                                            if (foundY != -1) {
-                                                player.camera.position.y = foundY.toFloat() + 0.1f
-                                            } else {
-                                                player.camera.position.y += 5.0f
-                                            }
-                                            player.velocity.set(0f, 0f, 0f)
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE64A19)),
-                                        shape = RoundedCornerShape(4.dp),
-                                        contentPadding = PaddingValues(0.dp),
-                                        modifier = Modifier.weight(1f).height(32.dp)
+                                        }
+                                    }
+
+                                    // 3. Permissions Checklist
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                            .padding(8.dp)
                                     ) {
-                                        Text("🆘 UNSTUCK", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "ABILITIES & PERMISSIONS:",
+                                            color = Color(0xFFFFB300),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.padding(bottom = 6.dp)
+                                        )
+                                        
+                                        // Fly switch
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().height(28.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Can Fly (Полет)", color = Color.White, fontSize = 11.sp)
+                                            Switch(
+                                                checked = player.canFly,
+                                                onCheckedChange = { player.canFly = it }
+                                            )
+                                        }
+                                        
+                                        // Noclip switch
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().height(28.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Noclip (Сквозь блоки)", color = Color.White, fontSize = 11.sp)
+                                            Switch(
+                                                checked = player.noclip,
+                                                onCheckedChange = { player.noclip = it }
+                                            )
+                                        }
+                                        
+                                        // Build permission switch
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().height(28.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Can Place (Ставить блоки)", color = Color.White, fontSize = 11.sp)
+                                            Switch(
+                                                checked = player.canBuild,
+                                                onCheckedChange = { player.canBuild = it }
+                                            )
+                                        }
+                                        
+                                        // Break permission switch
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().height(28.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("Can Break (Ломать блоки)", color = Color.White, fontSize = 11.sp)
+                                            Switch(
+                                                checked = player.canBreak,
+                                                onCheckedChange = { player.canBreak = it }
+                                            )
+                                        }
+                                    }
+
+                                    // 4. Special commands
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                            .padding(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "COMMAND CENTER:",
+                                            color = Color(0xFFFFB300),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.padding(bottom = 6.dp)
+                                        )
+                                        
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Day command
+                                            Button(
+                                                onClick = { world.isNight = false },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
+                                                shape = RoundedCornerShape(4.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                modifier = Modifier.weight(1f).height(30.dp)
+                                            ) {
+                                                Text("☀️ SET DAY", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            
+                                            // Night command
+                                            Button(
+                                                onClick = { world.isNight = true },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF311B92)),
+                                                shape = RoundedCornerShape(4.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                modifier = Modifier.weight(1f).height(30.dp)
+                                            ) {
+                                                Text("🌙 SET NIGHT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                        
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Teleport Spawn command
+                                            Button(
+                                                onClick = {
+                                                    val spawnY = world.getSpawnHeight(0, 0)
+                                                    player.camera.position.set(0.5f, spawnY, 0.5f)
+                                                    player.velocity.set(0f, 0f, 0f)
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C)),
+                                                shape = RoundedCornerShape(4.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                modifier = Modifier.weight(1f).height(30.dp)
+                                            ) {
+                                                Text("🏠 TO SPAWN", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            
+                                            // Unstuck / Teleport up command
+                                            Button(
+                                                onClick = {
+                                                    val curX = Math.floor(player.camera.position.x.toDouble()).toInt()
+                                                    val curY = Math.floor(player.camera.position.y.toDouble()).toInt()
+                                                    val curZ = Math.floor(player.camera.position.z.toDouble()).toInt()
+                                                    
+                                                    var foundY = -1
+                                                    for (y in curY..250) {
+                                                        if (!BlockRegistry.isSolid(world.getBlock(curX, y, curZ)) &&
+                                                            !BlockRegistry.isSolid(world.getBlock(curX, y + 1, curZ))) {
+                                                            foundY = y
+                                                            break
+                                                        }
+                                                    }
+                                                    if (foundY != -1) {
+                                                        player.camera.position.y = foundY.toFloat() + 0.1f
+                                                    } else {
+                                                        player.camera.position.y += 5.0f
+                                                    }
+                                                    player.velocity.set(0f, 0f, 0f)
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE64A19)),
+                                                shape = RoundedCornerShape(4.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                modifier = Modifier.weight(1f).height(30.dp)
+                                            ) {
+                                                Text("🆘 UNSTUCK", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(1f)
+                                            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                            .padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "You must be an Operator (OP) to use these settings.",
+                                            color = Color.LightGray,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp,
+                                            textAlign = TextAlign.Center
+                                        )
                                     }
                                 }
-                            }
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                                    .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                                    .padding(16.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "You must be an Operator (OP) to use these settings.",
-                                    color = Color.LightGray,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.Center
-                                )
                             }
                         }
                     }
