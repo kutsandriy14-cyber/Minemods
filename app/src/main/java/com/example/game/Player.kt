@@ -8,6 +8,43 @@ import com.example.engine.NetworkManager
 class Player(val world: World) {
     val camera = Camera()
     
+    enum class GameMode {
+        SURVIVAL,
+        CREATIVE,
+        SPECTATOR
+    }
+
+    var gameMode: GameMode = GameMode.SURVIVAL
+        set(value) {
+            field = value
+            when (value) {
+                GameMode.SURVIVAL -> {
+                    canFly = false
+                    noclip = false
+                    canBuild = true
+                    canBreak = true
+                }
+                GameMode.CREATIVE -> {
+                    canFly = true
+                    noclip = false
+                    canBuild = true
+                    canBreak = true
+                }
+                GameMode.SPECTATOR -> {
+                    canFly = true
+                    noclip = true
+                    canBuild = false
+                    canBreak = false
+                }
+            }
+        }
+
+    var isOp: Boolean = true
+    var canFly: Boolean = false
+    var noclip: Boolean = false
+    var canBuild: Boolean = true
+    var canBreak: Boolean = true
+
     // Position is camera.position
     var velocity = Vector3f()
     var isGrounded = false
@@ -61,12 +98,17 @@ class Player(val world: World) {
     }
     
     fun update(dt: Float, inputDirs: Vector3f, jump: Boolean) {
-        // Apply gravity to velocity
-        velocity.y -= 22f * dt
-        if (velocity.y < -30f) velocity.y = -30f // terminal velocity
+        val speed = if (canFly) 8.5f else 5.5f
+        
+        if (canFly) {
+            velocity.y = inputDirs.y * speed
+        } else {
+            // Apply gravity to velocity
+            velocity.y -= 22f * dt
+            if (velocity.y < -30f) velocity.y = -30f // terminal velocity
+        }
         
         // Input applied to horizontal velocity
-        val speed = 5.5f
         val fw = camera.front.copy()
         fw.y = 0f; fw.normalize()
         val rt = camera.right.copy()
@@ -77,59 +119,67 @@ class Player(val world: World) {
         velocity.x = moveDir.x * speed
         velocity.z = moveDir.z * speed
         
-        if (jump && isGrounded) {
+        if (!canFly && jump && isGrounded) {
             velocity.y = 7.5f
             isGrounded = false
         }
         
-        // 1. Move and resolve X
-        camera.position.x += velocity.x * dt
-        var playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-        var colliders = getSurroundingCollisionBoxes(playerBox)
-        for (box in colliders) {
-            if (playerBox.intersects(box)) {
-                if (velocity.x > 0) {
-                    camera.position.x = box.minX - (width / 2f) - 0.001f
-                } else if (velocity.x < 0) {
-                    camera.position.x = box.maxX + (width / 2f) + 0.001f
+        if (noclip) {
+            // No collision resolution, just free motion!
+            camera.position.x += velocity.x * dt
+            camera.position.y += velocity.y * dt
+            camera.position.z += velocity.z * dt
+            isGrounded = false
+        } else {
+            // 1. Move and resolve X
+            camera.position.x += velocity.x * dt
+            var playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
+            var colliders = getSurroundingCollisionBoxes(playerBox)
+            for (box in colliders) {
+                if (playerBox.intersects(box)) {
+                    if (velocity.x > 0) {
+                        camera.position.x = box.minX - (width / 2f) - 0.001f
+                    } else if (velocity.x < 0) {
+                        camera.position.x = box.maxX + (width / 2f) + 0.001f
+                    }
+                    velocity.x = 0f
+                    playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
                 }
-                velocity.x = 0f
-                playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
             }
-        }
-        
-        // 2. Move and resolve Z
-        camera.position.z += velocity.z * dt
-        playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-        colliders = getSurroundingCollisionBoxes(playerBox)
-        for (box in colliders) {
-            if (playerBox.intersects(box)) {
-                if (velocity.z > 0) {
-                    camera.position.z = box.minZ - (width / 2f) - 0.001f
-                } else if (velocity.z < 0) {
-                    camera.position.z = box.maxZ + (width / 2f) + 0.001f
+            
+            // 2. Move and resolve Z
+            camera.position.z += velocity.z * dt
+            playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
+            colliders = getSurroundingCollisionBoxes(playerBox)
+            for (box in colliders) {
+                if (playerBox.intersects(box)) {
+                    if (velocity.z > 0) {
+                        camera.position.z = box.minZ - (width / 2f) - 0.001f
+                    } else if (velocity.z < 0) {
+                        camera.position.z = box.maxZ + (width / 2f) + 0.001f
+                    }
+                    velocity.z = 0f
+                    playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
                 }
-                velocity.z = 0f
-                playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
             }
-        }
-        
-        // 3. Move and resolve Y
-        isGrounded = false
-        camera.position.y += velocity.y * dt
-        playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-        colliders = getSurroundingCollisionBoxes(playerBox)
-        for (box in colliders) {
-            if (playerBox.intersects(box)) {
-                if (velocity.y > 0) { // Hit ceiling
-                    camera.position.y = box.minY - 0.2f - 0.001f
-                    velocity.y = 0f
-                } else if (velocity.y < 0) { // Hit ground
-                    camera.position.y = box.maxY + 1.6f + 0.001f
-                    velocity.y = 0f
-                    isGrounded = true
+            
+            // 3. Move and resolve Y
+            isGrounded = false
+            camera.position.y += velocity.y * dt
+            playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
+            colliders = getSurroundingCollisionBoxes(playerBox)
+            for (box in colliders) {
+                if (playerBox.intersects(box)) {
+                    if (velocity.y > 0) { // Hit ceiling
+                        camera.position.y = box.minY - 0.2f - 0.001f
+                        velocity.y = 0f
+                    } else if (velocity.y < 0) { // Hit ground
+                        camera.position.y = box.maxY + 1.6f + 0.001f
+                        velocity.y = 0f
+                        isGrounded = true
+                    }
+                    playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
                 }
-                playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
             }
         }
         
@@ -143,6 +193,9 @@ class Player(val world: World) {
     }
 
     fun raycastBlock(breakBlock: Boolean) {
+        if (breakBlock && !canBreak) return
+        if (!breakBlock && !canBuild) return
+
         // Simple DDA raycast up to 5 blocks
         var rx = camera.position.x
         var ry = camera.position.y
@@ -177,7 +230,7 @@ class Player(val world: World) {
                         lastBx.toFloat() + 1f, lastBy.toFloat() + 1f, lastBz.toFloat() + 1f
                     )
                     val playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-                    if (!playerBox.intersects(blockBox)) {
+                    if (noclip || !playerBox.intersects(blockBox)) {
                         world.setBlock(lastBx, lastBy, lastBz, selectedBlockType)
                         NetworkManager.sendBlockChange(lastBx, lastBy, lastBz, selectedBlockType)
                     }

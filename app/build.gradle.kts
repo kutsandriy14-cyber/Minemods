@@ -59,6 +59,24 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
+tasks.register<Copy>("saveVersionedApk") {
+    from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
+    into(rootProject.file(".build-outputs/${android.defaultConfig.versionName}"))
+    rename { "app-debug.apk" }
+}
+
+tasks.register<Copy>("saveVersionedApkRoot") {
+    from(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
+    into(rootProject.file("build-outputs/${android.defaultConfig.versionName}"))
+    rename { "app-debug.apk" }
+}
+
+tasks.configureEach {
+    if (name == "assembleDebug" || name == "packageDebug") {
+        finalizedBy("saveVersionedApk", "saveVersionedApkRoot")
+    }
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {

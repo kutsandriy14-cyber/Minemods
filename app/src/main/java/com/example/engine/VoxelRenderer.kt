@@ -5,14 +5,16 @@ import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import com.example.world.World
+import com.example.game.Player
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
-class VoxelRenderer(private val context: Context, private val world: World, val camera: Camera) : GLSurfaceView.Renderer {
+class VoxelRenderer(private val context: Context, private val world: World, val player: Player) : GLSurfaceView.Renderer {
 
+    val camera = player.camera
     private val playerMesh = PlayerMesh()
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -38,6 +40,11 @@ class VoxelRenderer(private val context: Context, private val world: World, val 
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        if (world.isNight) {
+            GLES30.glClearColor(0.04f, 0.05f, 0.1f, 1.0f) // Midnight/Space color
+        } else {
+            GLES30.glClearColor(0.5f, 0.8f, 1.0f, 1.0f) // Sunny sky color
+        }
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
 
         camera.updateViewMatrix()

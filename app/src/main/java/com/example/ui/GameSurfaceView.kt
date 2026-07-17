@@ -16,7 +16,7 @@ class GameSurfaceView(context: Context, val world: World, val player: Player) : 
     
     init {
         setEGLContextClientVersion(3)
-        renderer = VoxelRenderer(context, world, player.camera)
+        renderer = VoxelRenderer(context, world, player)
         setRenderer(renderer)
         renderMode = RENDERMODE_CONTINUOUSLY
     }

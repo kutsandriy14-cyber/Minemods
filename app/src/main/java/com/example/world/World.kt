@@ -8,6 +8,8 @@ import java.util.concurrent.ConcurrentHashMap
 class World {
     val chunks = ConcurrentHashMap<Pair<Int, Int>, Chunk>()
     
+    var isNight: Boolean = false
+    
     var seed: Long = 1337L
         set(value) {
             field = value
