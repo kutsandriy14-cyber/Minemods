@@ -14,7 +14,7 @@ class Player(val world: World) {
         SPECTATOR
     }
 
-    var gameMode: GameMode = GameMode.SURVIVAL
+    var gameMode: GameMode = GameMode.CREATIVE
         set(value) {
             field = value
             when (value) {
@@ -144,11 +144,31 @@ class Player(val world: World) {
         return boxes
     }
     
-    fun update(dt: Float, inputDirs: Vector3f, jump: Boolean) {
-        val speed = if (canFly) 8.5f else 5.5f
+    var isFlying = false
+    private var lastJumpTime = 0L
+    private var wasJumping = false
+
+    fun update(dt: Float, inputDirs: Vector3f, jump: Boolean, isSneaking: Boolean = false) {
+        val jumpPressedThisFrame = jump && !wasJumping
+        wasJumping = jump
+
+        // Double jump detection
+        if (jumpPressedThisFrame && canFly) {
+            val now = System.currentTimeMillis()
+            if (now - lastJumpTime < 300) {
+                isFlying = !isFlying
+                lastJumpTime = 0L // consume
+            } else {
+                lastJumpTime = now
+            }
+        }
+
+        val speed = if (isFlying) 12.5f else 5.5f
         
-        if (canFly) {
-            velocity.y = inputDirs.y * speed
+        if (isFlying) {
+            // Flight inertia and control
+            val targetY = if (jump) speed else if (isSneaking) -speed else 0f
+            velocity.y += (targetY - velocity.y) * 10f * dt
         } else {
             // Apply gravity to velocity
             velocity.y -= 22f * dt
@@ -163,10 +183,18 @@ class Player(val world: World) {
         
         val moveDir = fw * inputDirs.z + rt * inputDirs.x
         
-        velocity.x = moveDir.x * speed
-        velocity.z = moveDir.z * speed
+        val targetX = moveDir.x * speed
+        val targetZ = moveDir.z * speed
         
-        if (!canFly && jump && isGrounded) {
+        if (isFlying) {
+             velocity.x += (targetX - velocity.x) * 10f * dt
+             velocity.z += (targetZ - velocity.z) * 10f * dt
+        } else {
+             velocity.x = targetX
+             velocity.z = targetZ
+        }
+        
+        if (!isFlying && jump && isGrounded) {
             velocity.y = 7.5f
             isGrounded = false
         }
@@ -219,7 +247,10 @@ class Player(val world: World) {
             camera.position.z += moveZ
             
             if (moveY != dy) {
-                if (dy < 0) isGrounded = true
+                if (dy < 0) {
+                    isGrounded = true
+                    isFlying = false
+                }
                 velocity.y = 0f
             } else {
                 isGrounded = false

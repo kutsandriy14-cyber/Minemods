@@ -10,6 +10,9 @@ object TextureManager {
     var atlasTextureId: Int = 0
         private set
         
+    var atlasBitmap: Bitmap? = null
+        private set
+        
     fun init(context: Context) {
         val textureObjectIds = IntArray(1)
         GLES30.glGenTextures(1, textureObjectIds, 0)
@@ -20,6 +23,7 @@ object TextureManager {
         
         // Generate placeholder atlas (256x256, 16x16 tiles = 16x16 pixels per tile)
         val bitmap = createPlaceholderAtlas()
+        atlasBitmap = bitmap
         
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textureObjectIds[0])
         
@@ -30,7 +34,7 @@ object TextureManager {
         
         GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bitmap, 0)
         
-        bitmap.recycle()
+        // bitmap.recycle() // Keep for UI
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
         
         atlasTextureId = textureObjectIds[0]
@@ -131,6 +135,75 @@ object TextureManager {
                     else -> android.graphics.Color.rgb(219, 209, 159)
                 }
                 drawPixel(64f + px, py.toFloat(), color)
+            }
+        }
+        
+        // Wood Top/Bottom (5, 1) - offset x=80, y=16
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val ring = Math.max(Math.abs(px - 7.5), Math.abs(py - 7.5)).toInt()
+                val color = if (ring % 2 == 0) android.graphics.Color.rgb(130, 95, 60) else android.graphics.Color.rgb(100, 70, 45)
+                drawPixel(80f + px, 16f + py, color)
+            }
+        }
+        
+        // Wood Side (4, 1) - offset x=64, y=16
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val grain = (px / 2) % 2
+                val color = if (grain == 0) android.graphics.Color.rgb(100, 70, 45) else android.graphics.Color.rgb(80, 50, 30)
+                drawPixel(64f + px, 16f + py, color)
+            }
+        }
+
+        // Leaves (4, 3) - offset x=64, y=48
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val color = if ((px + py) % 3 == 0) android.graphics.Color.argb(200, 34, 139, 34) else android.graphics.Color.argb(220, 20, 100, 20)
+                drawPixel(64f + px, 48f + py, color)
+            }
+        }
+
+        // Planks (4, 0 is Sand, wait I used Sand for planks in BlockRegistry. Let's put Planks at 5, 0)
+        // I will change BlockRegistry later. Let's put Planks at (5, 0) - offset x=80, y=0
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val line = (py % 4 == 3 || px % 8 == (py/4)*4)
+                val color = if (line) android.graphics.Color.rgb(120, 90, 60) else android.graphics.Color.rgb(170, 130, 90)
+                drawPixel(80f + px, py.toFloat(), color)
+            }
+        }
+
+        // Glass (1, 3) - offset x=16, y=48
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val edge = (px == 0 || px == 15 || py == 0 || py == 15)
+                val color = if (edge) android.graphics.Color.argb(200, 200, 220, 255) else android.graphics.Color.argb(40, 200, 220, 255)
+                drawPixel(16f + px, 48f + py, color)
+            }
+        }
+        
+        // Cobblestone (0, 1) - offset x=0, y=16
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val color = if ((px+py)%5 == 0 || (px-py)%4 == 0) android.graphics.Color.rgb(60, 60, 60) else android.graphics.Color.rgb(100, 100, 100)
+                drawPixel(px.toFloat(), 16f + py, color)
+            }
+        }
+
+        // Water (13, 12) - offset x=208, y=192
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val color = android.graphics.Color.argb(180, 50, 100, 255)
+                drawPixel(208f + px, 192f + py, color)
+            }
+        }
+        
+        // Lava (13, 14) - offset x=208, y=224
+        for (py in 0..15) {
+            for (px in 0..15) {
+                val color = if ((px*py)%3 == 0) android.graphics.Color.rgb(255, 100, 0) else android.graphics.Color.rgb(255, 50, 0)
+                drawPixel(208f + px, 224f + py, color)
             }
         }
         

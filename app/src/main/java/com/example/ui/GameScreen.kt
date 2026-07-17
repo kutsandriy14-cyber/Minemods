@@ -37,6 +37,11 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import com.example.engine.TextureManager
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -174,7 +179,7 @@ fun GameScreen(
                 if(moveUp) 1f else if(moveDown) -1f else 0f,
                 if(moveForward) 1f else if(moveBackward) -1f else 0f
             )
-            player.update(dt, dirs, jump)
+            player.update(dt, dirs, jump, moveDown)
             player.updateBreaking(dt, isBreaking)
             
             // Update HUD values
@@ -268,6 +273,40 @@ fun GameScreen(
             factory = { GameSurfaceView(it, world, player) },
             modifier = Modifier.fillMaxSize()
         )
+        
+        // World Generation Overlay
+        var isGenerating by remember { mutableStateOf(true) }
+        LaunchedEffect(Unit) {
+            while (isActive) {
+                if (world.chunks.size > 8) {
+                    isGenerating = false
+                    break
+                }
+                delay(100)
+            }
+        }
+        
+        if (isGenerating) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF14304A)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "GENERATING WORLD...",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFFFB300),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    CircularProgressIndicator(color = Color(0xFFFFB300))
+                }
+            }
+        }
         
         // 1. Classic Crosshair in the exact center of screen
         Box(
@@ -460,48 +499,23 @@ fun GameScreen(
                                 .padding(4.dp)
                         ) {
                             // Custom voxel preview graphic
-                            when (bId) {
-                                BlockRegistry.GRASS -> {
-                                    Column(modifier = Modifier.fillMaxSize()) {
-                                        Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color(0xFF55AA55)))
-                                        Box(modifier = Modifier.weight(1.5f).fillMaxWidth().background(Color(0xFF866043)))
+                            if (bId == BlockRegistry.WOODEN_PICKAXE) {
+                                Text("⛏️", fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
+                            } else if (bId == BlockRegistry.STONE_PICKAXE) {
+                                Text("⛏", color = Color.Gray, fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
+                            } else {
+                                val atlas = TextureManager.atlasBitmap
+                                if (atlas != null) {
+                                    val (tx, ty) = BlockRegistry.getTextureUV(bId, 2) // Side face
+                                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                                        drawImage(
+                                            image = atlas.asImageBitmap(),
+                                            srcOffset = IntOffset(tx * 16, ty * 16),
+                                            srcSize = IntSize(16, 16),
+                                            dstOffset = IntOffset(0, 0),
+                                            dstSize = IntSize(size.width.toInt(), size.height.toInt())
+                                        )
                                     }
-                                }
-                                BlockRegistry.DIRT -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF866043)))
-                                }
-                                BlockRegistry.STONE -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF808080)))
-                                }
-                                BlockRegistry.SAND -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFDBD19F)))
-                                }
-                                BlockRegistry.WOOD -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF5C4033)))
-                                }
-                                BlockRegistry.PLANKS -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFB5885C)))
-                                }
-                                BlockRegistry.LEAVES -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF228B22)))
-                                }
-                                BlockRegistry.COBBLESTONE -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF555555)))
-                                }
-                                BlockRegistry.WATER -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0x803366FF)))
-                                }
-                                BlockRegistry.LAVA -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFFF5500)))
-                                }
-                                BlockRegistry.GLASS -> {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0x60EEEEFF)))
-                                }
-                                BlockRegistry.WOODEN_PICKAXE -> {
-                                    Text("⛏️", fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
-                                }
-                                BlockRegistry.STONE_PICKAXE -> {
-                                    Text("⛏", color = Color.Gray, fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
                                 }
                             }
                         }
@@ -510,64 +524,53 @@ fun GameScreen(
             }
         }
         
-        // 4. Custom D-pad (Bottom Left)
+        // Virtual Joystick State
+        var joyOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+        val joyRadius = 120f
+        
+        LaunchedEffect(joyOffset) {
+            val thresh = joyRadius * 0.25f
+            moveForward = joyOffset.y < -thresh
+            moveBackward = joyOffset.y > thresh
+            moveRight = joyOffset.x > thresh
+            moveLeft = joyOffset.x < -thresh
+        }
+
+        // 4. Virtual Joystick (Bottom Left)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 24.dp, bottom = 24.dp)
-                .size(130.dp)
+                .padding(start = 32.dp, bottom = 32.dp)
+                .size(160.dp)
                 .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.changes.any { it.pressed }) {
+                                val change = event.changes.first { it.pressed }
+                                val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                                val pos = change.position - center
+                                val length = pos.getDistance()
+                                if (length > joyRadius) {
+                                     joyOffset = pos * (joyRadius / length)
+                                } else {
+                                     joyOffset = pos
+                                }
+                            } else {
+                                joyOffset = androidx.compose.ui.geometry.Offset.Zero
+                            }
+                        }
+                    }
+                }
         ) {
-            // Forward
-            IconButton(
-                onClick = {},
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .size(40.dp)
-                    .pointerInputHoverLike { down -> moveForward = down }
-            ) {
-                Text("▲", color = Color.White, fontSize = 20.sp)
-            }
-            
-            // Left
-            IconButton(
-                onClick = {},
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .size(40.dp)
-                    .pointerInputHoverLike { down -> moveLeft = down }
-            ) {
-                Text("◀", color = Color.White, fontSize = 20.sp)
-            }
-            
-            // Right
-            IconButton(
-                onClick = {},
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .size(40.dp)
-                    .pointerInputHoverLike { down -> moveRight = down }
-            ) {
-                Text("▶", color = Color.White, fontSize = 20.sp)
-            }
-            
-            // Backward
-            IconButton(
-                onClick = {},
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .size(40.dp)
-                    .pointerInputHoverLike { down -> moveBackward = down }
-            ) {
-                Text("▼", color = Color.White, fontSize = 20.sp)
-            }
-            
-            // Center decorative hub
+            // Stick
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(24.dp)
-                    .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                    .offset { androidx.compose.ui.unit.IntOffset(joyOffset.x.toInt(), joyOffset.y.toInt()) }
+                    .size(60.dp)
+                    .background(Color.White.copy(alpha = 0.6f), CircleShape)
             )
         }
         
@@ -579,7 +582,7 @@ fun GameScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Jump or Fly UP / DN buttons
-            if (player.canFly) {
+            if (player.isFlying) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {},
@@ -587,7 +590,7 @@ fun GameScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1).copy(alpha = 0.8f)),
                         modifier = Modifier
                             .size(56.dp)
-                            .pointerInputHoverLike { down -> moveUp = down }
+                            .pointerInputHoverLike { down -> jump = down }
                     ) {
                         Text("UP ▲", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
@@ -908,13 +911,9 @@ fun GameScreen(
                                             fontSize = 10.sp
                                         )
                                     }
-                                    Switch(
+                                    RetroSwitch(
                                         checked = player.isOp,
-                                        onCheckedChange = { player.isOp = it },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = Color(0xFFFFB300),
-                                            checkedTrackColor = Color(0xFFFFB300).copy(alpha = 0.5f)
-                                        )
+                                        onCheckedChange = { player.isOp = it }
                                     )
                                 }
 
@@ -988,7 +987,7 @@ fun GameScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text("Can Fly (Полет)", color = Color.White, fontSize = 11.sp)
-                                            Switch(
+                                            RetroSwitch(
                                                 checked = player.canFly,
                                                 onCheckedChange = { player.canFly = it }
                                             )
@@ -1001,7 +1000,7 @@ fun GameScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text("Keep Inventory (Сохр. инвентаря)", color = Color.White, fontSize = 11.sp)
-                                            Switch(
+                                            RetroSwitch(
                                                 checked = true, // Default true for this engine currently
                                                 onCheckedChange = { }
                                             )
@@ -1014,7 +1013,7 @@ fun GameScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text("Set Night Time", color = Color.White, fontSize = 11.sp)
-                                            Switch(
+                                            RetroSwitch(
                                                 checked = world.isNight,
                                                 onCheckedChange = { world.isNight = it }
                                             )
@@ -1027,7 +1026,7 @@ fun GameScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text("Can Place (Ставить блоки)", color = Color.White, fontSize = 11.sp)
-                                            Switch(
+                                            RetroSwitch(
                                                 checked = player.canBuild,
                                                 onCheckedChange = { player.canBuild = it }
                                             )
@@ -1040,7 +1039,7 @@ fun GameScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text("Can Break (Ломать блоки)", color = Color.White, fontSize = 11.sp)
-                                            Switch(
+                                            RetroSwitch(
                                                 checked = player.canBreak,
                                                 onCheckedChange = { player.canBreak = it }
                                             )
@@ -1176,6 +1175,28 @@ fun GameScreen(
                 }
             )
         }
+    }
+}
+
+@Composable
+fun RetroSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(40.dp, 20.dp)
+            .background(Color(0xFF333333), RoundedCornerShape(2.dp))
+            .border(1.dp, Color(0xFF111111), RoundedCornerShape(2.dp))
+            .clickable { onCheckedChange(!checked) }
+    ) {
+        val alignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
+        val knobColor = if (checked) Color(0xFF55AA55) else Color(0xFF888888)
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(0.5f)
+                .align(alignment)
+                .background(knobColor, RoundedCornerShape(2.dp))
+                .border(1.dp, Color.Black, RoundedCornerShape(2.dp))
+        )
     }
 }
 

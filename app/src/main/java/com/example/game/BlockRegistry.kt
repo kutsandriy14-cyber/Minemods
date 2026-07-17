@@ -51,7 +51,7 @@ object BlockRegistry {
                 }
             }
             LEAVES -> 4 to 3
-            PLANKS -> 4 to 0 // using sand texture temporarily
+            PLANKS -> 5 to 0 // 5 to 0 is planks
             GLASS -> 1 to 3
             COBBLESTONE -> 0 to 1
             else -> 0 to 0

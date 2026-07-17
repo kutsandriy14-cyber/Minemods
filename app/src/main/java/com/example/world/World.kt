@@ -112,6 +112,7 @@ class World {
         val chunk = Chunk(cx, cz)
         val worldXOffset = cx * 16
         val worldZOffset = cz * 16
+        val WATER_LEVEL = 70
         
         for (x in 0..15) {
             val wx = worldXOffset + x
@@ -123,20 +124,56 @@ class World {
                 
                 for (y in 0..255) {
                     if (y > height) {
-                        chunk.setBlock(x, y, z, BlockRegistry.AIR)
+                        if (y <= WATER_LEVEL) {
+                            chunk.setBlock(x, y, z, BlockRegistry.WATER)
+                        } else {
+                            chunk.setBlock(x, y, z, BlockRegistry.AIR)
+                        }
                     } else {
-                        // Cave check with 3D noise threshold
-                        if (y > 2 && isCave(wx, y, wz)) {
+                        // Cave check with 3D noise threshold - don't break surface
+                        if (y > 5 && y < height - 3 && isCave(wx, y, wz)) {
                             chunk.setBlock(x, y, z, BlockRegistry.AIR)
                         } else {
                             val blockType = when {
-                                y == height -> biomeBlock
+                                y == height -> {
+                                    if (height < WATER_LEVEL) {
+                                        BlockRegistry.SAND
+                                    } else {
+                                        biomeBlock
+                                    }
+                                }
                                 y > height - 4 -> {
-                                    if (biomeBlock == BlockRegistry.SAND) BlockRegistry.SAND else BlockRegistry.DIRT
+                                    if (biomeBlock == BlockRegistry.SAND || height < WATER_LEVEL) BlockRegistry.SAND else BlockRegistry.DIRT
                                 }
                                 else -> BlockRegistry.STONE
                             }
                             chunk.setBlock(x, y, z, blockType)
+                        }
+                    }
+                }
+                
+                // Add trees randomly
+                if (height > WATER_LEVEL && biomeBlock == BlockRegistry.GRASS) {
+                    val treeChance = noise.noise2D((wx * 10).toFloat(), (wz * 10).toFloat())
+                    if (treeChance > 0.85f && x > 2 && x < 13 && z > 2 && z < 13) {
+                        // Trunk
+                        for (ty in 1..4) {
+                            if (height + ty <= 255) chunk.setBlock(x, height + ty, z, BlockRegistry.WOOD)
+                        }
+                        // Leaves
+                        for (lx in -2..2) {
+                            for (ly in 3..5) {
+                                for (lz in -2..2) {
+                                    if (Math.abs(lx) + Math.abs(lz) + Math.abs(ly - 3) <= 4) {
+                                        if (height + ly <= 255) {
+                                            val b = chunk.getBlock(x + lx, height + ly, z + lz)
+                                            if (b == BlockRegistry.AIR) {
+                                                chunk.setBlock(x + lx, height + ly, z + lz, BlockRegistry.LEAVES)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
