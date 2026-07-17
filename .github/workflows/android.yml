@@ -1,10 +1,10 @@
-name: Android CI & Build Outputs
+name: Android CI
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "develop" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "develop" ]
   workflow_dispatch:
 
 permissions:
@@ -12,49 +12,78 @@ permissions:
 
 jobs:
   build:
+    name: Build Android App
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: gradle
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
 
-    - name: Grant Execute Permission to Gradle Wrapper
-      run: chmod +x gradlew || true
+      - name: Create environment configuration
+        run: |
+          if [ -f .env.example ]; then
+            cp .env.example .env
+          else
+            touch .env
+          fi
 
-    - name: Build with Gradle
-      run: ./gradlew assembleDebug
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 9.3.1
 
-    - name: Determine App Version
-      id: get_version
-      run: |
-        VERSION_NAME=$(grep -oE "versionName\s*=\s*\"[^\"]+\"" app/build.gradle.kts | cut -d'"' -f2)
-        if [ -z "$VERSION_NAME" ]; then
-          VERSION_NAME="1.0"
-        fi
-        echo "version=$VERSION_NAME" >> $GITHUB_OUTPUT
-        echo "Found version: $VERSION_NAME"
+      - name: Clean stale wrapper files if any
+        run: |
+          rm -f gradlew gradlew.bat
+          rm -rf gradle/wrapper
 
-    - name: Prepare Build Outputs Folder
-      run: |
-        VERSION_NAME="${{ steps.get_version.outputs.version }}"
-        mkdir -p build-outputs/$VERSION_NAME
-        cp app/build/outputs/apk/debug/app-debug.apk build-outputs/$VERSION_NAME/MineMods-$VERSION_NAME.apk
-        echo "Successfully copied MineMods-$VERSION_NAME.apk to build-outputs/$VERSION_NAME/"
+      - name: Decode or Generate Debug Keystore
+        run: |
+          if [ -f debug.keystore.base64 ]; then
+            echo "Decoding debug.keystore.base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ -f app/debug.keystore.base64 ]; then
+            echo "Decoding app/debug.keystore.base64..."
+            base64 -d app/debug.keystore.base64 > debug.keystore
+          else
+            echo "debug.keystore.base64 not found. Generating a new debug.keystore using keytool..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
-    - name: Commit and Push built APK to GitHub
-      run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
-        git add build-outputs/
-        git diff-index --quiet HEAD || (git commit -m "Automated build: MineMods ${{ steps.get_version.outputs.version }}" && git push)
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build with Gradle
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Determine App Version
+        id: get_version
+        run: |
+          VERSION_NAME=$(grep -oE "versionName\s*=\s*\"[^\"]+\"" app/build.gradle.kts | cut -d'"' -f2)
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME="1.0"
+          fi
+          echo "version=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "Found version: $VERSION_NAME"
+
+      - name: Prepare Build Outputs Folder
+        run: |
+          VERSION_NAME="${{ steps.get_version.outputs.version }}"
+          mkdir -p build-outputs/$VERSION_NAME
+          cp app/build/outputs/apk/debug/app-debug.apk build-outputs/$VERSION_NAME/MineMods-$VERSION_NAME.apk
+          echo "Successfully copied MineMods-$VERSION_NAME.apk to build-outputs/$VERSION_NAME/"
+
+      - name: Commit and Push built APK to GitHub
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add build-outputs/
+          git diff-index --quiet HEAD || (git commit -m "Automated build: MineMods ${{ steps.get_version.outputs.version }}" && git push)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
