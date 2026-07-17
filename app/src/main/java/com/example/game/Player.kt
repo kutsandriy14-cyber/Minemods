@@ -14,7 +14,7 @@ class Player(val world: World) {
         SPECTATOR
     }
 
-    var gameMode: GameMode = GameMode.CREATIVE
+    var gameMode: GameMode = GameMode.SURVIVAL
         set(value) {
             field = value
             when (value) {
@@ -23,12 +23,26 @@ class Player(val world: World) {
                     noclip = false
                     canBuild = true
                     canBreak = true
+                    for (i in 0 until inventory.size) inventory.items[i] = BlockRegistry.AIR
+                    inventory.items[0] = BlockRegistry.WOODEN_PICKAXE
                 }
                 GameMode.CREATIVE -> {
                     canFly = true
                     noclip = false
                     canBuild = true
                     canBreak = true
+                    inventory.items[0] = BlockRegistry.WOODEN_PICKAXE
+                    inventory.items[1] = BlockRegistry.GRASS
+                    inventory.items[2] = BlockRegistry.STONE
+                    inventory.items[3] = BlockRegistry.WOOD
+                    inventory.items[4] = BlockRegistry.PLANKS
+                    inventory.items[5] = BlockRegistry.LEAVES
+                    inventory.items[6] = BlockRegistry.GLASS
+                    inventory.items[7] = BlockRegistry.COBBLESTONE
+                    inventory.items[8] = BlockRegistry.WATER
+                    inventory.items[9] = BlockRegistry.LAVA
+                    inventory.items[10] = BlockRegistry.DIRT
+                    inventory.items[11] = BlockRegistry.SAND
                 }
                 GameMode.SPECTATOR -> {
                     canFly = true
@@ -328,8 +342,20 @@ class Player(val world: World) {
             breakProgress += dt * speedMultiplier
             
             if (breakProgress >= 1.0f) {
+                val brokenBlock = world.getBlock(breakingBx, breakingBy, breakingBz)
                 world.setBlock(breakingBx, breakingBy, breakingBz, BlockRegistry.AIR)
                 NetworkManager.sendBlockChange(breakingBx, breakingBy, breakingBz, BlockRegistry.AIR)
+                
+                // Add to inventory in survival
+                if (gameMode == GameMode.SURVIVAL && !BlockRegistry.isItem(brokenBlock)) {
+                    for (i in 0 until inventory.size) {
+                        if (inventory.items[i] == BlockRegistry.AIR || inventory.items[i] == brokenBlock) {
+                            inventory.items[i] = brokenBlock
+                            break
+                        }
+                    }
+                }
+                
                 breakProgress = 0f
                 breakingBy = -1
             }

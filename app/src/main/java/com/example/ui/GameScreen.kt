@@ -54,34 +54,35 @@ fun GameScreen(
 ) {
     val context = LocalContext.current
     val world = remember { 
-        World().apply { 
-            if (mode != "client") {
-                // Try loading world; generate new one if file doesn't exist
-                val playerPlaceholder = Player(this)
-                val success = WorldSaveManager.loadWorld(context, worldName, this, playerPlaceholder)
-                if (!success) {
-                    seed = worldName.hashCode().toLong()
-                    generateInitialWorld()
-                }
-            } else {
-                // Client gets seed and chunks from host over socket!
+        World().apply {
+            if (mode == "client") {
                 seed = 123456L
             }
         }
     }
+    
     val player = remember { 
         Player(world).apply {
-            if (mode != "client") {
+            if (mode == "client") {
+                camera.position.set(8.0f, 65f, 8.0f)
+            } else {
+                camera.position.set(0.5f, 80f, 0.5f)
+            }
+        }
+    }
+    
+    LaunchedEffect(Unit) {
+        if (mode != "client") {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                 val saveFile = File(WorldSaveManager.getWorldsDir(context), "$worldName/level.dat")
                 if (!saveFile.exists()) {
+                    world.seed = worldName.hashCode().toLong()
+                    world.generateInitialWorld()
                     val spawnY = world.getSpawnHeight(0, 0)
-                    camera.position.set(0.5f, spawnY, 0.5f)
+                    player.camera.position.set(0.5f, spawnY, 0.5f)
                 } else {
-                    WorldSaveManager.loadWorld(context, worldName, world, this)
+                    WorldSaveManager.loadWorld(context, worldName, world, player)
                 }
-            } else {
-                // Client initial spawn placement
-                camera.position.set(8.0f, 65f, 8.0f)
             }
         }
     }
