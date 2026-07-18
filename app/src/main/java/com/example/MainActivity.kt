@@ -186,7 +186,7 @@ fun MainMenu(
                     }
                     
                     Text(
-                        text = "Voxel Sandbox Engine v3.0",
+                        text = "Voxel Sandbox Engine v1.2 (Multiplayer)",
                         color = Color(0xFF8FBDD3),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
@@ -430,7 +430,7 @@ fun MainMenu(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
-                    modifier = Modifier.padding(32.dp)
+                    modifier = Modifier.padding(24.dp)
                 ) {
                     Text(
                         text = "LAN MULTIPLAYER",
@@ -446,17 +446,80 @@ fun MainMenu(
                         color = Color.LightGray,
                         fontSize = 14.sp,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(bottom = 48.dp)
+                        modifier = Modifier.padding(bottom = 24.dp)
                     )
+
+                    // Version selection panel
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .padding(bottom = 24.dp)
+                            .width(320.dp)
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "YOUR GAME VERSION",
+                                color = Color(0xFFFFB300),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            
+                            var currentVer by remember { mutableStateOf(com.example.engine.NetworkManager.gameVersion) }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                listOf("1.2", "1.2.3", "1.3").forEach { ver ->
+                                    val isSelected = currentVer == ver
+                                    Box(
+                                        modifier = Modifier
+                                            .border(1.dp, if (isSelected) Color(0xFFFFB300) else Color.Gray.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                            .background(if (isSelected) Color(0xFFFFB300).copy(alpha = 0.2f) else Color.Transparent)
+                                            .clickable { 
+                                                currentVer = ver
+                                                com.example.engine.NetworkManager.gameVersion = ver
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(ver, color = Color.White, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    }
+                                }
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            OutlinedTextField(
+                                value = currentVer,
+                                onValueChange = { 
+                                    currentVer = it
+                                    com.example.engine.NetworkManager.gameVersion = it
+                                },
+                                label = { Text("Custom Version", color = Color.LightGray, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+                                singleLine = true,
+                                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Color.White),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color(0xFFFFB300),
+                                    unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier.fillMaxWidth().height(48.dp)
+                            )
+                        }
+                    }
 
                     RetroMenuButton(text = "HOST LAN GAME") {
                         menuState = MenuState.HOST_SELECT
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     RetroMenuButton(text = "JOIN LAN GAME") {
                         menuState = MenuState.JOIN_INPUT
                     }
-                    Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
                     RetroMenuButton(text = "BACK") {
                         menuState = MenuState.MAIN
                     }
@@ -554,13 +617,20 @@ fun MainMenu(
 
             MenuState.JOIN_INPUT -> {
                 var ipInput by remember { mutableStateOf("") }
+                
+                DisposableEffect(Unit) {
+                    com.example.engine.NetworkManager.startUdpDiscovery()
+                    onDispose {
+                        com.example.engine.NetworkManager.stopUdpDiscovery()
+                    }
+                }
 
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
-                        .width(400.dp)
-                        .padding(24.dp)
+                        .width(420.dp)
+                        .padding(16.dp)
                 ) {
                     Text(
                         text = "JOIN LAN SERVER",
@@ -568,14 +638,14 @@ fun MainMenu(
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
                         color = Color(0xFFFFB300),
-                        modifier = Modifier.padding(bottom = 12.dp)
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
                     Text(
-                        text = "Enter the host's local IP address:",
+                        text = "Enter host IP or select a discovered game below:",
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(bottom = 24.dp)
+                        modifier = Modifier.padding(bottom = 16.dp)
                     )
 
                     OutlinedTextField(
@@ -595,7 +665,102 @@ fun MainMenu(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "DISCOVERED LAN SERVERS",
+                        color = Color(0xFFFFB300),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.align(Alignment.Start).padding(bottom = 8.dp)
+                    )
+
+                    val discovered = com.example.engine.NetworkManager.discoveredServers
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                    ) {
+                        if (discovered.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Searching for LAN servers...\n(Make sure Host is on the same Wi-Fi)",
+                                    color = Color.LightGray.copy(alpha = 0.6f),
+                                    fontFamily = FontFamily.Monospace,
+                                    textAlign = TextAlign.Center,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize().padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(discovered) { server ->
+                                    val versionMatches = server.version == com.example.engine.NetworkManager.gameVersion
+                                    Card(
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (versionMatches) Color.White.copy(alpha = 0.1f) else Color.Red.copy(alpha = 0.05f)
+                                        ),
+                                        shape = RoundedCornerShape(4.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { 
+                                                ipInput = server.ip
+                                            }
+                                            .border(1.dp, if (versionMatches) Color.Green.copy(alpha = 0.3f) else Color.Red.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = server.name,
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 13.sp
+                                                )
+                                                Text(
+                                                    text = "IP: ${server.ip}",
+                                                    color = Color.LightGray,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text(
+                                                    text = "v${server.version}",
+                                                    color = if (versionMatches) Color.Green else Color.Red,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 12.sp
+                                                )
+                                                Text(
+                                                    text = if (versionMatches) "COMPATIBLE" else "MISMATCH",
+                                                    color = if (versionMatches) Color.Green.copy(alpha = 0.7f) else Color.Red.copy(alpha = 0.7f),
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 9.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),

@@ -1,9 +1,7 @@
 package com.example.game
 
-import com.example.engine.Camera
+import com.example.engine.*
 import com.example.world.World
-import com.example.engine.Vector3f
-import com.example.engine.NetworkManager
 
 class Player(val world: World) {
     val camera = Camera()
@@ -14,6 +12,10 @@ class Player(val world: World) {
         SPECTATOR
     }
 
+    var health: Int = 20
+    var maxHealth: Int = 20
+    var goldHearts: Int = 0 // Absorption hearts
+    
     var gameMode: GameMode = GameMode.SURVIVAL
         set(value) {
             field = value
@@ -31,18 +33,20 @@ class Player(val world: World) {
                     noclip = false
                     canBuild = true
                     canBreak = true
-                    inventory.items[0] = BlockRegistry.WOODEN_PICKAXE
-                    inventory.items[1] = BlockRegistry.GRASS
-                    inventory.items[2] = BlockRegistry.STONE
-                    inventory.items[3] = BlockRegistry.WOOD
-                    inventory.items[4] = BlockRegistry.PLANKS
-                    inventory.items[5] = BlockRegistry.LEAVES
-                    inventory.items[6] = BlockRegistry.GLASS
-                    inventory.items[7] = BlockRegistry.COBBLESTONE
-                    inventory.items[8] = BlockRegistry.WATER
-                    inventory.items[9] = BlockRegistry.LAVA
-                    inventory.items[10] = BlockRegistry.DIRT
-                    inventory.items[11] = BlockRegistry.SAND
+                    val creativeItems = byteArrayOf(
+                        BlockRegistry.WOODEN_PICKAXE, BlockRegistry.STONE_PICKAXE, BlockRegistry.IRON_PICKAXE, BlockRegistry.DIAMOND_PICKAXE,
+                        BlockRegistry.WOODEN_SWORD, BlockRegistry.STONE_SWORD, BlockRegistry.IRON_SWORD, BlockRegistry.DIAMOND_SWORD,
+                        BlockRegistry.GRASS, BlockRegistry.DIRT, BlockRegistry.STONE, BlockRegistry.COBBLESTONE,
+                        BlockRegistry.WOOD, BlockRegistry.PLANKS, BlockRegistry.LEAVES, BlockRegistry.GLASS,
+                        BlockRegistry.SAND, BlockRegistry.WATER, BlockRegistry.LAVA, BlockRegistry.BEDROCK,
+                        BlockRegistry.COAL_ORE, BlockRegistry.IRON_ORE, BlockRegistry.GOLD_ORE, BlockRegistry.DIAMOND_ORE,
+                        BlockRegistry.COAL, BlockRegistry.IRON_INGOT, BlockRegistry.GOLD_INGOT, BlockRegistry.DIAMOND,
+                        BlockRegistry.ROSE, BlockRegistry.DANDELION, BlockRegistry.TALL_GRASS, BlockRegistry.CACTUS,
+                        BlockRegistry.GOLDEN_APPLE, BlockRegistry.POTION_HEALING
+                    )
+                    for (i in 0 until Math.min(inventory.size, creativeItems.size)) {
+                        inventory.items[i] = creativeItems[i]
+                    }
                 }
                 GameMode.SPECTATOR -> {
                     canFly = true
@@ -177,7 +181,11 @@ class Player(val world: World) {
             }
         }
 
-        val speed = if (isFlying) 12.5f else 5.5f
+        // Active speed effect update
+        val speedMultiplier = EffectsEngine.getSpeedMultiplier()
+        val jumpMultiplier = EffectsEngine.getJumpMultiplier()
+
+        val speed = if (isFlying) 12.5f * speedMultiplier else 5.5f * speedMultiplier
         
         if (isFlying) {
             // Flight inertia and control
@@ -209,70 +217,28 @@ class Player(val world: World) {
         }
         
         if (!isFlying && jump && isGrounded) {
-            velocity.y = 7.5f
+            velocity.y = 7.5f * jumpMultiplier
             isGrounded = false
+            // Spawn jumping dust/grass particles at player's feet
+            com.example.engine.ParticleEngine.spawnJumpParticles(camera.position.x, camera.position.y, camera.position.z)
         }
         
-        if (noclip) {
-            // No collision resolution, just free motion!
-            camera.position.x += velocity.x * dt
-            camera.position.y += velocity.y * dt
-            camera.position.z += velocity.z * dt
-            isGrounded = false
-        } else {
-            val dx = velocity.x * dt
-            val dy = velocity.y * dt
-            val dz = velocity.z * dt
-            
-            var moveX = dx
-            var moveY = dy
-            var moveZ = dz
-            
-            val playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-            
-            // Expand AABB to include the destination region for broadphase checking
-            val expandedBox = AABB(
-                playerBox.minX + Math.min(0f, moveX) - 0.1f, playerBox.minY + Math.min(0f, moveY) - 0.1f, playerBox.minZ + Math.min(0f, moveZ) - 0.1f,
-                playerBox.maxX + Math.max(0f, moveX) + 0.1f, playerBox.maxY + Math.max(0f, moveY) + 0.1f, playerBox.maxZ + Math.max(0f, moveZ) + 0.1f
-            )
-            
-            val colliders = getSurroundingCollisionBoxes(expandedBox)
-            
-            // Resolve Y
-            for (box in colliders) {
-                moveY = playerBox.calculateYOffset(box, moveY)
-            }
-            playerBox.offset(0f, moveY, 0f)
-            
-            // Resolve X
-            for (box in colliders) {
-                moveX = playerBox.calculateXOffset(box, moveX)
-            }
-            playerBox.offset(moveX, 0f, 0f)
-            
-            // Resolve Z
-            for (box in colliders) {
-                moveZ = playerBox.calculateZOffset(box, moveZ)
-            }
-            playerBox.offset(0f, 0f, moveZ)
-            
-            camera.position.x += moveX
-            camera.position.y += moveY
-            camera.position.z += moveZ
-            
-            if (moveY != dy) {
-                if (dy < 0) {
-                    isGrounded = true
-                    isFlying = false
-                }
-                velocity.y = 0f
-            } else {
-                isGrounded = false
-            }
-            
-            if (moveX != dx) velocity.x = 0f
-            if (moveZ != dz) velocity.z = 0f
+        // Resolve movement and collisions using PhysicalEngine
+        isGrounded = PhysicalEngine.resolveCollision(
+            world = world,
+            pos = camera.position,
+            vel = velocity,
+            dt = dt,
+            w = 0.6f,
+            h = 1.8f,
+            noclip = noclip
+        )
+        if (isGrounded) {
+            isFlying = false
         }
+        
+        // Update status effects tick via EffectsEngine
+        EffectsEngine.updateEffects(dt, this)
         
         // Out of bounds safety check (void fallback)
         if (camera.position.y < -10f) {
@@ -295,37 +261,51 @@ class Player(val world: World) {
             return
         }
 
-        var rx = camera.position.x
-        var ry = camera.position.y
-        var rz = camera.position.z
-        
         val dx = camera.front.x
         val dy = camera.front.y
         val dz = camera.front.z
         
-        var foundBx = -1
-        var foundBy = -1
-        var foundBz = -1
-        
-        for (i in 0..100) {
-            rx += dx * 0.05f
-            ry += dy * 0.05f
-            rz += dz * 0.05f
-            
-            val bx = Math.floor(rx.toDouble()).toInt()
-            val by = Math.floor(ry.toDouble()).toInt()
-            val bz = Math.floor(rz.toDouble()).toInt()
-            
-            val block = world.getBlock(bx, by, bz)
-            if (BlockRegistry.isSolid(block)) {
-                foundBx = bx
-                foundBy = by
-                foundBz = bz
-                break
+        // Check for mobs in front first to attack them
+        for (mob in world.mobs) {
+            if (mob.isDead) continue
+            val mdx = mob.position.x - camera.position.x
+            val mdy = mob.position.y + 0.9f - camera.position.y
+            val mdz = mob.position.z - camera.position.z
+            val dist = Math.sqrt((mdx * mdx + mdy * mdy + mdz * mdz).toDouble()).toFloat()
+            if (dist < 3f) {
+                // Dot product to see if looking at it
+                val dot = (mdx / dist) * dx + (mdy / dist) * dy + (mdz / dist) * dz
+                if (dot > 0.9f) {
+                    // Attack mob with ItemEngine damage calculations!
+                    val weapon = inventory.getSelectedBlock()
+                    val damage = ItemEngine.getWeaponDamage(weapon)
+                    mob.health -= damage
+                    if (mob.health <= 0) {
+                        mob.isDead = true
+                    }
+                    breakProgress = -1f // Cooldown delay
+                    return
+                }
             }
         }
         
-        if (foundBy != -1) {
+        if (breakProgress < 0f) {
+            breakProgress += dt
+            if (breakProgress >= 0f) breakProgress = 0f
+            return
+        }
+
+        // Raycast blocks using RenderPhysicsEngine
+        val ray = RenderPhysicsEngine.raycast(
+            world, camera.position.x, camera.position.y, camera.position.z,
+            dx, dy, dz, 5.0f
+        )
+        
+        if (ray != null) {
+            val foundBx = ray.bx
+            val foundBy = ray.by
+            val foundBz = ray.bz
+            
             if (foundBx != breakingBx || foundBy != breakingBy || foundBz != breakingBz) {
                 breakingBx = foundBx
                 breakingBy = foundBy
@@ -333,16 +313,16 @@ class Player(val world: World) {
                 breakProgress = 0f
             }
             
-            // Depends on tool and block type, but simple 1s break time for now
             val equippedTool = inventory.getSelectedBlock()
-            var speedMultiplier = 1.0f 
-            if (equippedTool == BlockRegistry.WOODEN_PICKAXE) speedMultiplier = 2.0f
-            if (equippedTool == BlockRegistry.STONE_PICKAXE) speedMultiplier = 4.0f
+            val brokenBlock = world.getBlock(breakingBx, breakingBy, breakingBz)
+            val speedMultiplier = ItemEngine.getToolMiningSpeed(equippedTool, brokenBlock)
             
             breakProgress += dt * speedMultiplier
             
             if (breakProgress >= 1.0f) {
-                val brokenBlock = world.getBlock(breakingBx, breakingBy, breakingBz)
+                // Spawn beautiful block debris break particles matching the block type
+                com.example.engine.ParticleEngine.spawnBlockBreakParticles(breakingBx, breakingBy, breakingBz, brokenBlock)
+                
                 world.setBlock(breakingBx, breakingBy, breakingBz, BlockRegistry.AIR)
                 NetworkManager.sendBlockChange(breakingBx, breakingBy, breakingBz, BlockRegistry.AIR)
                 
@@ -365,53 +345,54 @@ class Player(val world: World) {
         }
     }
 
+    fun useItem() {
+        val selectedBlock = inventory.getSelectedBlock()
+        if (ItemEngine.isFoodOrPotion(selectedBlock)) {
+            EffectsEngine.consumeItem(selectedBlock, this)
+        }
+    }
+
     fun raycastBlock(breakBlock: Boolean) {
         if (breakBlock) return // Breaking is handled by updateBreaking now
         if (!canBuild) return
 
-        // Simple DDA raycast up to 5 blocks
-        var rx = camera.position.x
-        var ry = camera.position.y
-        var rz = camera.position.z
+        // Raycast blocks using RenderPhysicsEngine
+        val ray = RenderPhysicsEngine.raycast(
+            world, camera.position.x, camera.position.y, camera.position.z,
+            camera.front.x, camera.front.y, camera.front.z, 5.0f
+        )
         
-        val dx = camera.front.x
-        val dy = camera.front.y
-        val dz = camera.front.z
-        
-        var lastBx = -1
-        var lastBy = -1
-        var lastBz = -1
-        
-        for (i in 0..100) {
-            rx += dx * 0.05f
-            ry += dy * 0.05f
-            rz += dz * 0.05f
-            
-            val bx = Math.floor(rx.toDouble()).toInt()
-            val by = Math.floor(ry.toDouble()).toInt()
-            val bz = Math.floor(rz.toDouble()).toInt()
-            
-            val block = world.getBlock(bx, by, bz)
-            if (BlockRegistry.isSolid(block)) {
-                if (lastBy != -1) {
-                    val blockBox = AABB(
-                        lastBx.toFloat(), lastBy.toFloat(), lastBz.toFloat(),
-                        lastBx.toFloat() + 1f, lastBy.toFloat() + 1f, lastBz.toFloat() + 1f
-                    )
-                    val playerBox = getPlayerAABB(camera.position.x, camera.position.y, camera.position.z)
-                    if (noclip || !playerBox.intersects(blockBox)) {
-                        val blockToPlace = inventory.getSelectedBlock()
-                        if (!BlockRegistry.isItem(blockToPlace)) {
-                            world.setBlock(lastBx, lastBy, lastBz, blockToPlace)
-                            NetworkManager.sendBlockChange(lastBx, lastBy, lastBz, blockToPlace)
-                        }
-                    }
-                }
-                return
+        if (ray != null) {
+            // Find placing spot based on targeted face
+            val placeX = ray.bx + when (ray.face) {
+                2 -> -1
+                3 -> 1
+                else -> 0
             }
-            lastBx = bx
-            lastBy = by
-            lastBz = bz
+            val placeY = ray.by + when (ray.face) {
+                1 -> -1
+                0 -> 1
+                else -> 0
+            }
+            val placeZ = ray.bz + when (ray.face) {
+                4 -> -1
+                5 -> 1
+                else -> 0
+            }
+            
+            val blockBox = PhysicalEngine.AABB(
+                placeX.toFloat(), placeY.toFloat(), placeZ.toFloat(),
+                placeX.toFloat() + 1f, placeY.toFloat() + 1f, placeZ.toFloat() + 1f
+            )
+            val playerBox = PhysicalEngine.getEntityAABB(camera.position.x, camera.position.y, camera.position.z, 0.6f, 1.8f)
+            
+            if (noclip || !playerBox.intersects(blockBox)) {
+                val blockToPlace = inventory.getSelectedBlock()
+                if (!BlockRegistry.isItem(blockToPlace)) {
+                    world.setBlock(placeX, placeY, placeZ, blockToPlace)
+                    NetworkManager.sendBlockChange(placeX, placeY, placeZ, blockToPlace)
+                }
+            }
         }
     }
 }

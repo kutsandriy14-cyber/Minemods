@@ -14,6 +14,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -35,6 +37,7 @@ import com.example.world.WorldSaveManager
 import java.io.File
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.graphics.asImageBitmap
@@ -53,110 +56,52 @@ fun GameScreen(
     onBackClick: () -> Unit
 ) {
     val context = LocalContext.current
-    val world = remember { 
-        World().apply {
-            if (mode == "client") {
-                seed = 123456L
-            }
-        }
+    
+    // Initialize GameEngine
+    LaunchedEffect(worldName, mode, ip) {
+        com.example.engine.GameEngine.initGame(context, worldName, mode, ip)
     }
-    
-    val player = remember { 
-        Player(world).apply {
-            if (mode == "client") {
-                camera.position.set(8.0f, 65f, 8.0f)
-            } else {
-                camera.position.set(0.5f, 80f, 0.5f)
-            }
+
+    val world = com.example.engine.GameEngine.world
+    val player = com.example.engine.GameEngine.player
+
+    if (world == null || player == null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF14304A)),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = Color(0xFFFFB300))
         }
+        return
     }
-    
-    LaunchedEffect(Unit) {
-        if (mode != "client") {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                val saveFile = File(WorldSaveManager.getWorldsDir(context), "$worldName/level.dat")
-                if (!saveFile.exists()) {
-                    world.seed = worldName.hashCode().toLong()
-                    world.generateInitialWorld()
-                    val spawnY = world.getSpawnHeight(0, 0)
-                    player.camera.position.set(0.5f, spawnY, 0.5f)
-                } else {
-                    WorldSaveManager.loadWorld(context, worldName, world, player)
-                }
-            }
-        }
-    }
-    
-    var moveForward by remember { mutableStateOf(false) }
-    var moveBackward by remember { mutableStateOf(false) }
-    var moveLeft by remember { mutableStateOf(false) }
-    var moveRight by remember { mutableStateOf(false) }
-    var moveUp by remember { mutableStateOf(false) }
-    var moveDown by remember { mutableStateOf(false) }
-    var jump by remember { mutableStateOf(false) }
-    var isBreaking by remember { mutableStateOf(false) }
-    
-    var showAdminPanel by remember { mutableStateOf(false) }
-    
-    // Position state for HUD
-    var posX by remember { mutableStateOf(0f) }
-    var posY by remember { mutableStateOf(0f) }
-    var posZ by remember { mutableStateOf(0f) }
-    
-    // Block selection state
-    var selectedBlock by remember { mutableStateOf(BlockRegistry.STONE) }
-    
-    // FPS counter
-    var currentFps by remember { mutableStateOf(0) }
-    
-    // Settings state
-    val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    var fpsLimit by remember { mutableStateOf(preferences.getInt("fpsLimit", 60)) }
-    var renderDistance by remember { mutableStateOf(preferences.getFloat("renderDistance", 8f)) }
-    var textureQuality by remember { mutableStateOf(preferences.getString("textureQuality", "HIGH") ?: "HIGH") }
-    var cameraSensitivity by remember { mutableStateOf(preferences.getFloat("sensitivity", 1.0f)) }
-    
-    var isConnecting by remember { mutableStateOf(mode == "client") }
-    var connectionError by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        if (mode == "host") {
-            NetworkManager.startHost(world) {
-                // Host server started!
-            }
-        } else if (mode == "client") {
-            NetworkManager.startClient(
-                hostIp = ip,
-                world = world,
-                onConnectSuccess = {
-                    isConnecting = false
-                },
-                onConnectFailed = {
-                    connectionError = "Failed to connect to Host at $ip.\nCheck IP address, Wi-Fi network, and make sure the Host has started the game."
-                }
-            )
-        }
+    LaunchedEffect(world, player) {
+        // Load data
+        com.example.engine.GameEngine.loadWorldData(context, worldName, mode)
+        
+        // Start networking
+        com.example.engine.GameEngine.startNetworking(mode, ip)
 
-        // Register network callback for real-time block synchronization
-        NetworkManager.setOnBlockChangeCallback { bx, by, bz, type ->
-            val cx = bx shr 4
-            val cz = bz shr 4
-            world.chunks[Pair(cx, cz)]?.isModified = true
-        }
-
-        // Asynchronous background thread loop for generating/loading infinite chunks around the player
+        // Asynchronous background thread loop for generating/loading infinite chunks around the player via ChunkLoadEngine
         launch(Dispatchers.IO) {
             while (isActive) {
-                val currentRadius = preferences.getFloat("renderDistance", 8f).toInt()
-                world.updateChunksAroundPlayer(player.camera.position.x, player.camera.position.z, currentRadius)
-                delay(500)
+                val currentRadius = com.example.engine.GameEngine.renderDistance.toInt()
+                com.example.engine.ChunkLoadEngine.updatePlayerLoadRadius(
+                    world,
+                    player.camera.position.x,
+                    player.camera.position.z,
+                    currentRadius
+                )
+                delay(400)
             }
         }
 
         // Asynchronous background thread loop for broadcasting our player position to multiplayer peers
         launch(Dispatchers.IO) {
             while (isActive) {
-                NetworkManager.sendPlayerPosition(
+                com.example.engine.NetworkManager.sendPlayerPosition(
                     player.camera.position.x,
                     player.camera.position.y,
                     player.camera.position.z
@@ -166,34 +111,20 @@ fun GameScreen(
         }
 
         var lastTime = System.nanoTime()
-        var frames = 0
         var lastFpsTime = lastTime
         var lastSaveTime = lastTime
-        
-        while(true) {
+        val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+        while (isActive) {
             val now = System.nanoTime()
             val dt = (now - lastTime) / 1_000_000_000f
             lastTime = now
             
-            val dirs = Vector3f(
-                if(moveRight) 1f else if(moveLeft) -1f else 0f,
-                if(moveUp) 1f else if(moveDown) -1f else 0f,
-                if(moveForward) 1f else if(moveBackward) -1f else 0f
-            )
-            player.update(dt, dirs, jump, moveDown)
-            player.updateBreaking(dt, isBreaking)
+            com.example.engine.GameEngine.updateGameTick(dt)
             
-            // Update HUD values
-            posX = player.camera.position.x
-            posY = player.camera.position.y
-            posZ = player.camera.position.z
-            
-            frames++
             if (now - lastFpsTime >= 1_000_000_000) {
-                currentFps = frames
-                frames = 0
                 lastFpsTime = now
-                fpsLimit = preferences.getInt("fpsLimit", 60)
+                com.example.engine.GameEngine.fpsLimit = preferences.getInt("fpsLimit", 60)
             }
             
             // Auto-save every 10 seconds on background IO
@@ -202,69 +133,29 @@ fun GameScreen(
                 WorldSaveManager.saveWorld(context, worldName, world, player)
             }
             
-            val targetDelay = if (fpsLimit >= 120) 8L else if (fpsLimit == 30) 33L else 16L
+            val targetDelay = if (com.example.engine.GameEngine.fpsLimit >= 120) 8L else if (com.example.engine.GameEngine.fpsLimit == 30) 33L else 16L
             delay(targetDelay)
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(world, player) {
+        com.example.engine.ChunkLoadEngine.startEngine(
+            world,
+            player.camera.position.x,
+            player.camera.position.z,
+            com.example.engine.GameEngine.renderDistance.toInt()
+        )
         onDispose {
-            WorldSaveManager.saveWorld(context, worldName, world, player)
-            NetworkManager.stop()
+            com.example.engine.GameEngine.shutdown(context, worldName)
         }
     }
     
-    if (isConnecting) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF14304A)),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(32.dp)
-            ) {
-                Text(
-                    text = "CONNECTING TO HOST...",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFFFFB300),
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Syncing world seed and generating synchronized chunks...",
-                    color = Color.LightGray,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(32.dp))
-                CircularProgressIndicator(color = Color(0xFFFFB300))
-                
-                connectionError?.let { err ->
-                    Spacer(modifier = Modifier.height(32.dp))
-                    Text(
-                        text = err,
-                        color = Color.Red,
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(32.dp))
-                    Button(
-                        onClick = onBackClick,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text("BACK TO LOBBY", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
+    if (com.example.engine.GameEngine.isConnecting) {
+        com.example.engine.RenderUIEngine.ConnectingOverlay(
+            ip = ip,
+            connectionError = com.example.engine.GameEngine.connectionError,
+            onBackClick = onBackClick
+        )
         return
     }
 
@@ -276,82 +167,15 @@ fun GameScreen(
         )
         
         // World Generation Overlay
-        var isGenerating by remember { mutableStateOf(true) }
-        LaunchedEffect(Unit) {
-            while (isActive) {
-                if (world.chunks.size > 8) {
-                    isGenerating = false
-                    break
-                }
-                delay(100)
-            }
-        }
+        com.example.engine.RenderUIEngine.WorldGenerationOverlay(world)
         
-        if (isGenerating) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF14304A)),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "GENERATING WORLD...",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFFFFB300),
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(32.dp))
-                    CircularProgressIndicator(color = Color(0xFFFFB300))
-                }
-            }
-        }
+        // Death Overlay
+        com.example.engine.RenderUIEngine.DeathOverlay(player, world)
         
-        // 1. Classic Crosshair in the exact center of screen
-        Box(
-            modifier = Modifier.align(Alignment.Center)
-        ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(16.dp)
-            ) {
-                // Horizontal bar
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .fillMaxWidth()
-                        .height(2.dp)
-                        .background(Color.White.copy(alpha = 0.8f))
-                )
-                // Vertical bar
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .fillMaxHeight()
-                        .width(2.dp)
-                        .background(Color.White.copy(alpha = 0.8f))
-                )
-            }
-            
-            // Break Progress
-            if (player.breakProgress > 0f) {
-                LinearProgressIndicator(
-                    progress = { player.breakProgress },
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .offset(y = 24.dp)
-                        .width(48.dp)
-                        .height(4.dp),
-                    color = Color.White,
-                    trackColor = Color.Black.copy(alpha = 0.5f)
-                )
-            }
-        }
+        // Crosshair
+        com.example.engine.RenderUIEngine.CrosshairOverlay(player)
         
-        // 2. HUD - Left-aligned debug details & Right-aligned menus
+        // HUD - Debug Stats (Top Left) & Top Buttons (Top Right)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -359,854 +183,112 @@ fun GameScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
-            // Stats Panel
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.5f)),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.wrapContentSize()
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = "MineMods Sandbox",
-                        color = Color(0xFFFFB300),
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "FPS: $currentFps",
-                        color = if (currentFps >= 50) Color.Green else if (currentFps >= 30) Color.Yellow else Color.Red,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        text = "X: ${String.format("%.1f", posX)}",
-                        color = Color.White,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        text = "Y: ${String.format("%.1f", posY)}",
-                        color = Color.White,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        text = "Z: ${String.format("%.1f", posZ)}",
-                        color = Color.White,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp
-                    )
-                }
-            }
+            com.example.engine.RenderUIEngine.StatsHUDPanel(
+                currentFps = com.example.engine.GameEngine.currentFps,
+                posX = com.example.engine.GameEngine.posX,
+                posY = com.example.engine.GameEngine.posY,
+                posZ = com.example.engine.GameEngine.posZ
+            )
             
-            // Buttons Top Right
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { showAdminPanel = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.5f)),
-                    shape = RoundedCornerShape(8.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f))
-                ) {
-                    Text("⚙️ Settings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-
-                Button(
-                    onClick = onBackClick,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.4f)),
-                    shape = RoundedCornerShape(8.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red.copy(alpha = 0.6f))
-                ) {
-                    Text("Lobby", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-            }
+            com.example.engine.RenderUIEngine.TopButtonsHUDPanel(
+                onTerminalClick = { com.example.engine.UIEngine.showChat = !com.example.engine.UIEngine.showChat },
+                onSettingsClick = { com.example.engine.GameEngine.showAdminPanel = true },
+                onLobbyClick = onBackClick
+            )
         }
         
-        // 3. Hotbar & Active Item Display (Bottom Center)
-        var triggerRecompose by remember { mutableStateOf(0) } // Used to trigger recomposition when inventory changes
-        Column(
+        // Hotbar (Bottom Center)
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(bottom = 16.dp)
         ) {
-            // Selected item name overlay
-            val selectedBlockId = player.inventory.getSelectedBlock()
-            val blockName = when(selectedBlockId) {
-                BlockRegistry.GRASS -> "Grass Block"
-                BlockRegistry.DIRT -> "Dirt"
-                BlockRegistry.STONE -> "Stone"
-                BlockRegistry.SAND -> "Sand"
-                BlockRegistry.WOOD -> "Wood"
-                BlockRegistry.PLANKS -> "Wooden Planks"
-                BlockRegistry.LEAVES -> "Leaves"
-                BlockRegistry.COBBLESTONE -> "Cobblestone"
-                BlockRegistry.WATER -> "Water"
-                BlockRegistry.LAVA -> "Lava"
-                BlockRegistry.GLASS -> "Glass"
-                BlockRegistry.WOODEN_PICKAXE -> "Wooden Pickaxe"
-                BlockRegistry.STONE_PICKAXE -> "Stone Pickaxe"
-                else -> "None"
-            }
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.6f)),
-                shape = RoundedCornerShape(4.dp),
-                modifier = Modifier.padding(bottom = 8.dp)
-            ) {
-                Text(
-                    text = blockName,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-            }
-            
-            // Hotbar row
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.4f)),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth(0.55f)
-                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                    .padding(4.dp)
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier
-                        .padding(4.dp)
-                        .horizontalScroll(rememberScrollState())
-                ) {
-                    for (slot in 0 until player.inventory.hotbarSize) {
-                        val bId = player.inventory.getBlock(slot)
-                        val isSelected = player.inventory.selectedHotbarSlot == slot
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(
-                                    Color.White.copy(alpha = if (isSelected) 0.25f else 0.1f),
-                                    RoundedCornerShape(4.dp)
-                                )
-                                .border(
-                                    width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) Color(0xFFFFB300) else Color.White.copy(alpha = 0.3f),
-                                    shape = RoundedCornerShape(4.dp)
-                                )
-                                .clickable {
-                                    player.inventory.selectedHotbarSlot = slot
-                                    triggerRecompose++ // force UI update
-                                }
-                                .padding(4.dp)
-                        ) {
-                            // Custom voxel preview graphic
-                            if (bId == BlockRegistry.WOODEN_PICKAXE) {
-                                Text("⛏️", fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
-                            } else if (bId == BlockRegistry.STONE_PICKAXE) {
-                                Text("⛏", color = Color.Gray, fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
-                            } else {
-                                val atlas = TextureManager.atlasBitmap
-                                if (atlas != null) {
-                                    val (tx, ty) = BlockRegistry.getTextureUV(bId, 2) // Side face
-                                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                                        drawImage(
-                                            image = atlas.asImageBitmap(),
-                                            srcOffset = IntOffset(tx * 16, ty * 16),
-                                            srcSize = IntSize(16, 16),
-                                            dstOffset = IntOffset(0, 0),
-                                            dstSize = IntSize(size.width.toInt(), size.height.toInt())
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+            com.example.engine.RenderUIEngine.HotbarHUDPanel(
+                player = player,
+                triggerRecompose = com.example.engine.GameEngine.triggerRecompose,
+                onSlotSelected = { slot ->
+                    player.inventory.selectedHotbarSlot = slot
+                    com.example.engine.GameEngine.triggerRecompose++
                 }
-            }
+            )
         }
         
-        // Virtual Joystick State
-        var joyOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-        val joyRadius = 120f
-        
-        LaunchedEffect(joyOffset) {
-            val thresh = joyRadius * 0.25f
-            moveForward = joyOffset.y < -thresh
-            moveBackward = joyOffset.y > thresh
-            moveRight = joyOffset.x > thresh
-            moveLeft = joyOffset.x < -thresh
-        }
-
-        // 4. Virtual Joystick (Bottom Left)
+        // Virtual Joystick (Bottom Left)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 32.dp, bottom = 32.dp)
-                .size(160.dp)
-                .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            if (event.changes.any { it.pressed }) {
-                                val change = event.changes.first { it.pressed }
-                                val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
-                                val pos = change.position - center
-                                val length = pos.getDistance()
-                                if (length > joyRadius) {
-                                     joyOffset = pos * (joyRadius / length)
-                                } else {
-                                     joyOffset = pos
-                                }
-                            } else {
-                                joyOffset = androidx.compose.ui.geometry.Offset.Zero
-                            }
-                        }
-                    }
-                }
         ) {
-            // Stick
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .offset { androidx.compose.ui.unit.IntOffset(joyOffset.x.toInt(), joyOffset.y.toInt()) }
-                    .size(60.dp)
-                    .background(Color.White.copy(alpha = 0.6f), CircleShape)
+            com.example.engine.RenderUIEngine.VirtualJoystickHUD(
+                onDirectionChange = { fwd, bwd, lft, rgt ->
+                    com.example.engine.GameEngine.moveForward = fwd
+                    com.example.engine.GameEngine.moveBackward = bwd
+                    com.example.engine.GameEngine.moveLeft = lft
+                    com.example.engine.GameEngine.moveRight = rgt
+                }
             )
         }
         
-        // 5. Action controls (Bottom Right)
-        Column(
+        // Action Controls (Bottom Right)
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(end = 24.dp, bottom = 24.dp)
         ) {
-            // Jump or Fly UP / DN buttons
-            if (player.isFlying) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = {},
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1).copy(alpha = 0.8f)),
-                        modifier = Modifier
-                            .size(56.dp)
-                            .pointerInputHoverLike { down -> jump = down }
-                    ) {
-                        Text("UP ▲", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    
-                    Button(
-                        onClick = {},
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF303F9F).copy(alpha = 0.8f)),
-                        modifier = Modifier
-                            .size(56.dp)
-                            .pointerInputHoverLike { down -> moveDown = down }
-                    ) {
-                        Text("DN ▼", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                }
-            } else {
-                Button(
-                    onClick = {},
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300).copy(alpha = 0.7f)),
-                    modifier = Modifier
-                        .size(56.dp)
-                        .pointerInputHoverLike { down -> jump = down }
-                ) {
-                    Text("JUMP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                }
-            }
-            
-            // Break and Place side by side actions
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {},
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f)),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .height(48.dp)
-                        .pointerInputHoverLike { down -> isBreaking = down }
-                ) {
-                    Text("BREAK", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-                
-                Button(
-                    onClick = { player.raycastBlock(false) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Green.copy(alpha = 0.7f)),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(48.dp)
-                ) {
-                    Text("PLACE", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-            }
-        }
-
-        if (showAdminPanel) {
-            var activeSettingsTab by remember { mutableStateOf(0) } // 0 = General Settings, 1 = Operator (OP) Tools
-
-            AlertDialog(
-                onDismissRequest = { showAdminPanel = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false),
-                modifier = Modifier
-                    .fillMaxWidth(0.92f)
-                    .fillMaxHeight(0.92f)
-                    .border(2.dp, Color(0xFFFFB300), RoundedCornerShape(12.dp)),
-                containerColor = Color(0xFF101B2B),
-                title = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "⚙️ SETTINGS",
-                            color = Color(0xFFFFB300),
-                            fontWeight = FontWeight.ExtraBold,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 18.sp
-                        )
-                        IconButton(onClick = { showAdminPanel = false }) {
-                            Text("❌", color = Color.White, fontSize = 16.sp)
-                        }
-                    }
-                },
-                text = {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // Tab Selector Headers
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                .padding(4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Button(
-                                onClick = { activeSettingsTab = 0 },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (activeSettingsTab == 0) Color(0xFFFFB300) else Color.Transparent
-                                ),
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.weight(1f).height(38.dp),
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text(
-                                    "⚙️ SETTINGS",
-                                    color = if (activeSettingsTab == 0) Color.Black else Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-
-                            Button(
-                                onClick = { activeSettingsTab = 1 },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (activeSettingsTab == 1) Color(0xFFFFB300) else Color.Transparent
-                                ),
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.weight(1f).height(38.dp),
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text(
-                                    "👑 CHEATS",
-                                    color = if (activeSettingsTab == 1) Color.Black else Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-
-                        // Content Based on Active Tab
-                        if (activeSettingsTab == 0) {
-                            // --- SETTINGS TAB ---
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(14.dp)
-                            ) {
-                                // 1. FPS Limit Slider
-                                Column {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            "FPS LIMIT:",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp
-                                        )
-                                        Text(
-                                            "${fpsLimit} FPS",
-                                            color = Color(0xFFFFB300),
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp
-                                        )
-                                    }
-                                    Slider(
-                                        value = fpsLimit.toFloat(),
-                                        onValueChange = { 
-                                            fpsLimit = it.toInt()
-                                            preferences.edit().putInt("fpsLimit", it.toInt()).apply()
-                                        },
-                                        valueRange = 30f..120f,
-                                        steps = 2,
-                                        colors = SliderDefaults.colors(
-                                            thumbColor = Color(0xFFFFB300),
-                                            activeTrackColor = Color(0xFFFFB300),
-                                            inactiveTrackColor = Color.Gray.copy(alpha = 0.3f)
-                                        )
-                                    )
-                                }
-
-                                // 2. Render Distance Slider
-                                Column {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            "RENDER DISTANCE:",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp
-                                        )
-                                        Text(
-                                            "${renderDistance.toInt()} Chunks",
-                                            color = Color(0xFFFFB300),
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp
-                                        )
-                                    }
-                                    Slider(
-                                        value = renderDistance,
-                                        onValueChange = { 
-                                            renderDistance = it
-                                            preferences.edit().putFloat("renderDistance", it).apply()
-                                        },
-                                        valueRange = 4f..512f,
-                                        colors = SliderDefaults.colors(
-                                            thumbColor = Color(0xFFFFB300),
-                                            activeTrackColor = Color(0xFFFFB300),
-                                            inactiveTrackColor = Color.Gray.copy(alpha = 0.3f)
-                                        )
-                                    )
-                                }
-
-                                // 3. Camera Sensitivity Slider
-                                Column {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            "CAMERA SENSITIVITY:",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp
-                                        )
-                                        Text(
-                                            String.format("%.1fx", cameraSensitivity),
-                                            color = Color(0xFFFFB300),
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp
-                                        )
-                                    }
-                                    Slider(
-                                        value = cameraSensitivity,
-                                        onValueChange = { 
-                                            cameraSensitivity = it
-                                            preferences.edit().putFloat("sensitivity", it).apply()
-                                        },
-                                        valueRange = 0.2f..2.0f,
-                                        colors = SliderDefaults.colors(
-                                            thumbColor = Color(0xFFFFB300),
-                                            activeTrackColor = Color(0xFFFFB300),
-                                            inactiveTrackColor = Color.Gray.copy(alpha = 0.3f)
-                                        )
-                                    )
-                                }
-
-                                // 4. Texture Quality Selector
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        "TEXTURE QUALITY:",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 12.sp
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        listOf("LOW", "MEDIUM", "HIGH").forEach { quality ->
-                                            val isSelected = textureQuality == quality
-                                            Button(
-                                                onClick = {
-                                                    textureQuality = quality
-                                                    preferences.edit().putString("textureQuality", quality).apply()
-                                                },
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = if (isSelected) Color(0xFFFFB300) else Color(0xFF334155)
-                                                ),
-                                                shape = RoundedCornerShape(4.dp),
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                                modifier = Modifier.height(32.dp)
-                                            ) {
-                                                Text(
-                                                    text = quality,
-                                                    color = if (isSelected) Color.Black else Color.White,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontFamily = FontFamily.Monospace
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // --- OPERATOR TOOLS TAB ---
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                // 1. Operator Mode Toggle
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                        .padding(8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column {
-                                        Text(
-                                            text = "OPERATOR STATUS (OP)",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                        Text(
-                                            text = "Enables creative mode commands and block tools.",
-                                            color = Color.Gray,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                    RetroSwitch(
-                                        checked = player.isOp,
-                                        onCheckedChange = { player.isOp = it }
-                                    )
-                                }
-
-                                if (player.isOp) {
-                                    // 2. Select Game Mode Row
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                            .padding(8.dp)
-                                    ) {
-                                        Text(
-                                            text = "SELECT GAME MODE:",
-                                            color = Color(0xFFFFB300),
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            modifier = Modifier.padding(bottom = 6.dp)
-                                        )
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Player.GameMode.values().forEach { gMode ->
-                                                val isCurrent = player.gameMode == gMode
-                                                Button(
-                                                    onClick = { player.gameMode = gMode },
-                                                    colors = ButtonDefaults.buttonColors(
-                                                        containerColor = if (isCurrent) Color(0xFFFFB300) else Color(0xFF334155)
-                                                    ),
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                                                    modifier = Modifier.weight(1f).height(36.dp)
-                                                ) {
-                                                    Text(
-                                                        text = when(gMode) {
-                                                            Player.GameMode.SURVIVAL -> "SURVIVAL"
-                                                            Player.GameMode.CREATIVE -> "CREATIVE"
-                                                            Player.GameMode.SPECTATOR -> "SPECTATOR"
-                                                        },
-                                                        color = if (isCurrent) Color.Black else Color.White,
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 10.sp,
-                                                        fontFamily = FontFamily.Monospace
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // 3. Permissions Checklist
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                            .padding(8.dp)
-                                    ) {
-                                        Text(
-                                            text = "ABILITIES & PERMISSIONS:",
-                                            color = Color(0xFFFFB300),
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            modifier = Modifier.padding(bottom = 6.dp)
-                                        )
-                                        
-                                        // Fly switch
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().height(28.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text("Can Fly (Полет)", color = Color.White, fontSize = 11.sp)
-                                            RetroSwitch(
-                                                checked = player.canFly,
-                                                onCheckedChange = { player.canFly = it }
-                                            )
-                                        }
-                                        
-                                        // Keep Inventory switch
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().height(28.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text("Keep Inventory (Сохр. инвентаря)", color = Color.White, fontSize = 11.sp)
-                                            RetroSwitch(
-                                                checked = true, // Default true for this engine currently
-                                                onCheckedChange = { }
-                                            )
-                                        }
-                                        
-                                        // Time of day toggle
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().height(28.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text("Set Night Time", color = Color.White, fontSize = 11.sp)
-                                            RetroSwitch(
-                                                checked = world.isNight,
-                                                onCheckedChange = { world.isNight = it }
-                                            )
-                                        }
-                                        
-                                        // Build permission switch
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().height(28.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text("Can Place (Ставить блоки)", color = Color.White, fontSize = 11.sp)
-                                            RetroSwitch(
-                                                checked = player.canBuild,
-                                                onCheckedChange = { player.canBuild = it }
-                                            )
-                                        }
-                                        
-                                        // Break permission switch
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().height(28.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text("Can Break (Ломать блоки)", color = Color.White, fontSize = 11.sp)
-                                            RetroSwitch(
-                                                checked = player.canBreak,
-                                                onCheckedChange = { player.canBreak = it }
-                                            )
-                                        }
-                                    }
-
-                                    // 4. Special commands
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                            .padding(8.dp)
-                                    ) {
-                                        Text(
-                                            text = "COMMAND CENTER:",
-                                            color = Color(0xFFFFB300),
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            modifier = Modifier.padding(bottom = 6.dp)
-                                        )
-                                        
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            // Day command
-                                            Button(
-                                                onClick = { world.isNight = false },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
-                                                shape = RoundedCornerShape(4.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                modifier = Modifier.weight(1f).height(30.dp)
-                                            ) {
-                                                Text("☀️ SET DAY", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                            
-                                            // Night command
-                                            Button(
-                                                onClick = { world.isNight = true },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF311B92)),
-                                                shape = RoundedCornerShape(4.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                modifier = Modifier.weight(1f).height(30.dp)
-                                            ) {
-                                                Text("🌙 SET NIGHT", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                        
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            // Teleport Spawn command
-                                            Button(
-                                                onClick = {
-                                                    val spawnY = world.getSpawnHeight(0, 0)
-                                                    player.camera.position.set(0.5f, spawnY, 0.5f)
-                                                    player.velocity.set(0f, 0f, 0f)
-                                                },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C)),
-                                                shape = RoundedCornerShape(4.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                modifier = Modifier.weight(1f).height(30.dp)
-                                            ) {
-                                                Text("🏠 TO SPAWN", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                            
-                                            // Unstuck / Teleport up command
-                                            Button(
-                                                onClick = {
-                                                    val curX = Math.floor(player.camera.position.x.toDouble()).toInt()
-                                                    val curY = Math.floor(player.camera.position.y.toDouble()).toInt()
-                                                    val curZ = Math.floor(player.camera.position.z.toDouble()).toInt()
-                                                    
-                                                    var foundY = -1
-                                                    for (y in curY..250) {
-                                                        if (!BlockRegistry.isSolid(world.getBlock(curX, y, curZ)) &&
-                                                            !BlockRegistry.isSolid(world.getBlock(curX, y + 1, curZ))) {
-                                                            foundY = y
-                                                            break
-                                                        }
-                                                    }
-                                                    if (foundY != -1) {
-                                                        player.camera.position.y = foundY.toFloat() + 0.1f
-                                                    } else {
-                                                        player.camera.position.y += 5.0f
-                                                    }
-                                                    player.velocity.set(0f, 0f, 0f)
-                                                },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE64A19)),
-                                                shape = RoundedCornerShape(4.dp),
-                                                contentPadding = PaddingValues(0.dp),
-                                                modifier = Modifier.weight(1f).height(30.dp)
-                                            ) {
-                                                Text("🆘 UNSTUCK", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .weight(1f)
-                                            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                                            .padding(16.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "You must be an Operator (OP) to use these settings.",
-                                            color = Color.LightGray,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = { showAdminPanel = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300)),
-                        shape = RoundedCornerShape(4.dp),
-                        modifier = Modifier.padding(bottom = 8.dp, end = 8.dp)
-                    ) {
-                        Text("DONE", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            com.example.engine.RenderUIEngine.ActionControlsHUD(
+                player = player,
+                onJumpAction = { down -> com.example.engine.GameEngine.jump = down },
+                onMoveDownAction = { down -> com.example.engine.GameEngine.moveDown = down },
+                onBreakAction = { down -> com.example.engine.GameEngine.isBreaking = down },
+                onPlaceUseAction = {
+                    val blockToPlace = player.inventory.getSelectedBlock()
+                    if (com.example.game.BlockRegistry.isItem(blockToPlace) || blockToPlace == com.example.game.BlockRegistry.GOLDEN_APPLE || blockToPlace == com.example.game.BlockRegistry.POTION_HEALING) {
+                        player.useItem()
+                    } else {
+                        player.raycastBlock(false)
                     }
                 }
             )
         }
-    }
-}
-
-@Composable
-fun RetroSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(40.dp, 20.dp)
-            .background(Color(0xFF333333), RoundedCornerShape(2.dp))
-            .border(1.dp, Color(0xFF111111), RoundedCornerShape(2.dp))
-            .clickable { onCheckedChange(!checked) }
-    ) {
-        val alignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
-        val knobColor = if (checked) Color(0xFF55AA55) else Color(0xFF888888)
-        Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(0.5f)
-                .align(alignment)
-                .background(knobColor, RoundedCornerShape(2.dp))
-                .border(1.dp, Color.Black, RoundedCornerShape(2.dp))
-        )
-    }
-}
-
-fun Modifier.pointerInputHoverLike(onAction: (Boolean) -> Unit): Modifier = this.pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) {
-            val event = awaitPointerEvent()
-            val hasDown = event.changes.any { it.pressed }
-            onAction(hasDown)
+        
+        // Settings Dialog
+        if (com.example.engine.GameEngine.showAdminPanel) {
+            val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            com.example.engine.RenderUIEngine.AdminPanelDialogHUD(
+                player = player,
+                world = world,
+                fpsLimit = com.example.engine.GameEngine.fpsLimit,
+                onFpsLimitChange = {
+                    com.example.engine.GameEngine.fpsLimit = it
+                    preferences.edit().putInt("fpsLimit", it).apply()
+                },
+                renderDistance = com.example.engine.GameEngine.renderDistance,
+                onRenderDistanceChange = {
+                    com.example.engine.GameEngine.renderDistance = it
+                    preferences.edit().putFloat("renderDistance", it).apply()
+                },
+                cameraSensitivity = com.example.engine.GameEngine.cameraSensitivity,
+                onCameraSensitivityChange = {
+                    com.example.engine.GameEngine.cameraSensitivity = it
+                    preferences.edit().putFloat("sensitivity", it).apply()
+                },
+                textureQuality = com.example.engine.GameEngine.textureQuality,
+                onTextureQualityChange = {
+                    com.example.engine.GameEngine.textureQuality = it
+                    preferences.edit().putString("textureQuality", it).apply()
+                },
+                onDismiss = { com.example.engine.GameEngine.showAdminPanel = false }
+            )
+        }
+        
+        // Terminal Dialog
+        if (com.example.engine.UIEngine.showChat) {
+            com.example.engine.RenderUIEngine.TerminalDialogHUD(
+                player = player,
+                world = world,
+                onDismiss = { com.example.engine.UIEngine.showChat = false },
+                onCommandRun = { com.example.engine.GameEngine.triggerRecompose++ }
+            )
         }
     }
 }

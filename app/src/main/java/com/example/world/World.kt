@@ -1,6 +1,6 @@
 package com.example.world
 
-import com.example.engine.Chunk
+import com.example.engine.*
 import com.example.game.BlockRegistry
 import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentHashMap
@@ -21,46 +21,20 @@ class World {
     // Tracks all user block modifications (broken/placed) to sync with joining LAN clients
     val blockUpdates = ConcurrentHashMap<String, Byte>()
     
+    val mobs = java.util.concurrent.CopyOnWriteArrayList<com.example.game.Mob>()
+    
     // Calculate the exact terrain height at a world (x, z) coordinate
     fun getTerrainHeight(x: Int, z: Int): Int {
-        // 1.18 style terrain generation with larger scale and higher base
-        val nx = x.toFloat() * 0.005f
-        val nz = z.toFloat() * 0.005f
-        
-        val continentalness = noise.noise2D(nx, nz) * 20f
-        val erosion = noise.noise2D(nx * 2.0f + 100f, nz * 2.0f + 100f) * 10f
-        val peaks = noise.noise2D(nx * 5.0f + 200f, nz * 5.0f + 200f) * 15f
-        
-        // Final height shifted up to allow deep caves below
-        return (80f + continentalness + erosion + peaks).toInt().coerceIn(30, 150)
+        return BiomeEngine.getTerrainHeight(x, z, noise)
     }
 
     fun getBiomeAt(x: Int, z: Int): Byte {
-        // Biome selector: humidity/moisture noise
-        val moisture = noise.noise2D(x.toFloat() * 0.01f + 500f, z.toFloat() * 0.01f + 500f)
-        return if (moisture < -0.15f) {
-            BlockRegistry.SAND // Desert biome
-        } else {
-            BlockRegistry.GRASS // Plains biome
-        }
+        val biomeType = BiomeEngine.getBiomeType(x, z, noise)
+        return BiomeEngine.getSurfaceBlockForBiome(biomeType, getTerrainHeight(x, z))
     }
 
     fun isCave(x: Int, y: Int, z: Int): Boolean {
-        if (y > 130) return false // No caves too close to highest peaks
-        
-        // 1.18 Cheese caves (large open caverns)
-        val cheese = noise.noise3D(x * 0.02f, y * 0.02f, z * 0.02f)
-        if (cheese > 0.35f) return true
-        
-        // 1.18 Spaghetti caves (long winding tunnels)
-        val spaghetti1 = noise.noise3D(x * 0.04f, y * 0.04f, z * 0.04f)
-        val spaghetti2 = noise.noise3D(x * 0.04f + 100f, y * 0.04f + 100f, z * 0.04f + 100f)
-        
-        // A tunnel is where two noises are close to 0 (intersection of two planes)
-        val isSpaghetti = Math.abs(spaghetti1) < 0.06f && Math.abs(spaghetti2) < 0.06f
-        if (isSpaghetti) return true
-        
-        return false
+        return WorldEngine.isCave(x, y, z, noise)
     }
     
     fun getBlock(x: Int, y: Int, z: Int): Byte {
@@ -112,7 +86,7 @@ class World {
         val chunk = Chunk(cx, cz)
         val worldXOffset = cx * 16
         val worldZOffset = cz * 16
-        val WATER_LEVEL = 70
+        val WATER_LEVEL = WorldEngine.WATER_LEVEL
         
         for (x in 0..15) {
             val wx = worldXOffset + x
@@ -120,12 +94,19 @@ class World {
                 val wz = worldZOffset + z
                 
                 val height = getTerrainHeight(wx, wz)
-                val biomeBlock = getBiomeAt(wx, wz)
+                val biomeType = BiomeEngine.getBiomeType(wx, wz, noise)
+                val biomeBlock = BiomeEngine.getSurfaceBlockForBiome(biomeType, height)
+                val underBlock = BiomeEngine.getUndergroundBlockForBiome(biomeType)
                 
                 for (y in 0..255) {
                     if (y > height) {
                         if (y <= WATER_LEVEL) {
-                            chunk.setBlock(x, y, z, BlockRegistry.WATER)
+                            // Freeze water surface in Snowy Tundra biome
+                            if (biomeType == BiomeEngine.BIOME_SNOWY_TUNDRA && y == WATER_LEVEL) {
+                                chunk.setBlock(x, y, z, BlockRegistry.ICE)
+                            } else {
+                                chunk.setBlock(x, y, z, BlockRegistry.WATER)
+                            }
                         } else {
                             chunk.setBlock(x, y, z, BlockRegistry.AIR)
                         }
@@ -135,44 +116,93 @@ class World {
                             chunk.setBlock(x, y, z, BlockRegistry.AIR)
                         } else {
                             val blockType = when {
+                                y == 0 -> BlockRegistry.BEDROCK
+                                y < 4 && Math.random() < 0.5 -> BlockRegistry.BEDROCK
                                 y == height -> {
                                     if (height < WATER_LEVEL) {
-                                        BlockRegistry.SAND
+                                        if (biomeType == BiomeEngine.BIOME_VOLCANIC_WASTELAND) BlockRegistry.BASALT else BlockRegistry.SAND
                                     } else {
                                         biomeBlock
                                     }
                                 }
                                 y > height - 4 -> {
-                                    if (biomeBlock == BlockRegistry.SAND || height < WATER_LEVEL) BlockRegistry.SAND else BlockRegistry.DIRT
+                                    if (height < WATER_LEVEL) {
+                                        if (biomeType == BiomeEngine.BIOME_VOLCANIC_WASTELAND) BlockRegistry.BASALT else BlockRegistry.SAND
+                                    } else {
+                                        underBlock
+                                    }
                                 }
-                                else -> BlockRegistry.STONE
+                                else -> {
+                                    // Generate realistic interconnected ore veins in 3D using simplex noise
+                                    val coalNoise = noise.noise3D(wx * 0.12f, y * 0.12f, wz * 0.12f)
+                                    val ironNoise = noise.noise3D(wx * 0.16f + 100f, y * 0.16f + 100f, wz * 0.16f + 100f)
+                                    val goldNoise = noise.noise3D(wx * 0.22f + 200f, y * 0.22f + 200f, wz * 0.22f + 200f)
+                                    val diamondNoise = noise.noise3D(wx * 0.28f + 300f, y * 0.28f + 300f, wz * 0.28f + 300f)
+                                    
+                                    when {
+                                        y < 16 && diamondNoise > 0.65f -> BlockRegistry.DIAMOND_ORE
+                                        y < 32 && goldNoise > 0.60f -> BlockRegistry.GOLD_ORE
+                                        y < 64 && ironNoise > 0.55f -> BlockRegistry.IRON_ORE
+                                        coalNoise > 0.50f -> BlockRegistry.COAL_ORE
+                                        else -> BlockRegistry.STONE
+                                    }
+                                }
                             }
                             chunk.setBlock(x, y, z, blockType)
                         }
                     }
                 }
                 
-                // Add trees randomly
-                if (height > WATER_LEVEL && biomeBlock == BlockRegistry.GRASS) {
-                    val treeChance = noise.noise2D((wx * 10).toFloat(), (wz * 10).toFloat())
-                    if (treeChance > 0.85f && x > 2 && x < 13 && z > 2 && z < 13) {
-                        // Trunk
-                        for (ty in 1..4) {
-                            if (height + ty <= 255) chunk.setBlock(x, height + ty, z, BlockRegistry.WOOD)
+                // Add structures randomly based on Biome types
+                if (height > WATER_LEVEL) {
+                    val structChance = noise.noise2D((wx * 11).toFloat(), (wz * 11).toFloat())
+                    when (biomeType) {
+                        BiomeEngine.BIOME_JUNGLE -> {
+                            if (structChance > 0.82f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.JUNGLE_TREE)
+                            } else if (structChance < -0.6f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.FLOWER_PATCH)
+                            }
                         }
-                        // Leaves
-                        for (lx in -2..2) {
-                            for (ly in 3..5) {
-                                for (lz in -2..2) {
-                                    if (Math.abs(lx) + Math.abs(lz) + Math.abs(ly - 3) <= 4) {
-                                        if (height + ly <= 255) {
-                                            val b = chunk.getBlock(x + lx, height + ly, z + lz)
-                                            if (b == BlockRegistry.AIR) {
-                                                chunk.setBlock(x + lx, height + ly, z + lz, BlockRegistry.LEAVES)
-                                            }
-                                        }
-                                    }
-                                }
+                        BiomeEngine.BIOME_VOLCANIC_WASTELAND -> {
+                            if (structChance > 0.90f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.VOLCANIC_SPIRE)
+                            } else if (structChance in -0.8f..-0.75f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.OBSIDIAN_OBELISK)
+                            } else if (structChance in 0.42f..0.44f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.GLOWSTONE_CRYSTAL)
+                            }
+                        }
+                        BiomeEngine.BIOME_SNOWY_TUNDRA -> {
+                            if (structChance > 0.88f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.SNOWY_TREE)
+                            } else if (structChance in 0.40f..0.43f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.GLOWSTONE_CRYSTAL)
+                            }
+                        }
+                        BiomeEngine.BIOME_MOUNTAINS -> {
+                            if (structChance > 0.85f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.PINE_TREE)
+                            }
+                        }
+                        BiomeEngine.BIOME_DESERT -> {
+                            if (structChance > 0.88f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.CACTUS)
+                            }
+                        }
+                        BiomeEngine.BIOME_FOREST -> {
+                            if (structChance > 0.78f) {
+                                val t = if (Math.random() > 0.4) StructureEngine.StructureType.OAK_TREE else StructureEngine.StructureType.PINE_TREE
+                                StructureEngine.generateStructure(chunk, x, height, z, t)
+                            }
+                        }
+                        else -> { // BIOME_PLAINS
+                            if (structChance > 0.90f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.OAK_TREE)
+                            } else if (structChance < -0.55f) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.FLOWER_PATCH)
+                            } else if (structChance in 0.42f..0.44f && x in 3..12 && z in 3..12) {
+                                StructureEngine.generateStructure(chunk, x, height, z, StructureEngine.StructureType.DUNGEON_RUIN)
                             }
                         }
                     }
@@ -203,34 +233,7 @@ class World {
     val meshesToDestroy = java.util.concurrent.ConcurrentLinkedQueue<com.example.engine.ChunkMesh>()
 
     fun updateChunksAroundPlayer(playerX: Float, playerZ: Float, radius: Int = 4) {
-        val playerCx = Math.floor(playerX.toDouble() / 16.0).toInt()
-        val playerCz = Math.floor(playerZ.toDouble() / 16.0).toInt()
-        
-        // Generate chunks within radius
-        for (cx in (playerCx - radius)..(playerCx + radius)) {
-            for (cz in (playerCz - radius)..(playerCz + radius)) {
-                val pair = Pair(cx, cz)
-                if (!chunks.containsKey(pair)) {
-                    generateChunk(cx, cz)
-                }
-            }
-        }
-        
-        // Unload chunks that are too far away to conserve memory and maintain smooth FPS
-        val unloadThreshold = radius + 2
-        val iterator = chunks.keys.iterator()
-        while (iterator.hasNext()) {
-            val coords = iterator.next()
-            val dx = Math.abs(coords.first - playerCx)
-            val dz = Math.abs(coords.second - playerCz)
-            if (dx > unloadThreshold || dz > unloadThreshold) {
-                val removed = chunks[coords]
-                if (removed != null) {
-                    meshesToDestroy.add(removed.mesh)
-                }
-                iterator.remove()
-            }
-        }
+        ChunkLoadEngine.updatePlayerLoadRadius(this, playerX, playerZ, radius)
     }
 
     fun generateInitialWorld() {
